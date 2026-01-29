@@ -1,0 +1,11 @@
+---
+description: Before recommending commit, run the security-compliance subagent on current changes and only recommend commit if compliance passes or is explicitly approved.
+alwaysApply: true
+---
+
+# Security review before commit
+
+- Before the agent recommends committing code, it **must** run a security compliance review of the current (staged or unstaged) changes.
+- Launch the **security-compliance** subagent with the current diff and any relevant context.
+- Only recommend committing if the subagent’s report is **PASS**, or the user has explicitly approved documented exceptions.
+- If the report is **FAIL**, list the findings and suggest fixes; do not recommend commit until issues are fixed or the user approves an exception.
