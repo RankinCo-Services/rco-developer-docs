@@ -9,15 +9,7 @@ You are a security compliance reviewer. Given the code changes (diff) provided b
 
 ## Security rules to enforce
 
-Apply the rules in `.cursor/references/security-rules.md` when that file exists (in a project, this is the copied path). Until that file is populated, apply these baseline rules:
-
-1. **No hardcoded secrets** – No API keys, passwords, or tokens in source. Use env vars or a secrets manager.
-2. **Input validation** – User input must be validated and sanitized; avoid raw concatenation into SQL or shell.
-3. **Auth and authorization** – Sensitive routes must require authentication and appropriate permission checks.
-4. **Sensitive data** – No logging of passwords, tokens, or PII; no exposure in error messages or responses.
-5. **Dependencies** – No known vulnerable dependencies; use lockfiles and regular updates.
-
-Additional or project-specific rules may be listed in `cursor/references/security-rules.md`. If that file exists, summarize and apply those rules as well.
+Apply **all** rules listed in `.cursor/references/security-rules.md`. That file is the canonical list (Authentication & Authorization, Data Handling, Error Handling, API Design, Code Patterns, Testing & Validation, and the Core Principle). For each change in the diff, check whether it violates any of those rules and cite the specific rule in your findings.
 
 ## Output format
 
