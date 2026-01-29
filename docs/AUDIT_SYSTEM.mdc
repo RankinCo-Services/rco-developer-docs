@@ -1,0 +1,85 @@
+---
+description: AUTHORITATIVE source of truth for Beacon audit system (business, security, technical events; AuditService, AuditWorker, Platform DB; SOC2-oriented).
+globs: ["**/audit/**", "**/logAuditEvent*", "**/auditMiddleware*", "**/auditWorker*", "**/auditService*"]
+---
+
+# AUTHORITATIVE – Audit System
+
+This document is the **source of truth** for the Beacon platform audit system. It is maintained in rco-developer-docs **docs/**; the copy script copies it to project **docs/rco-standards/** and to **.cursor/references/**.
+
+**Derived from:** Comprehensive audit system implementation plan, beacon-tenant audit code (auditService, auditWorker, logAuditEvent, auditMiddleware, types), and Beacon backend (audit routes, worker start).
+
+---
+
+## 1. Description
+
+The audit system provides immutable audit trails for create, update, and delete operations (not read), supports business and security events, and aims for SOC2-oriented requirements. Sensitive (security) events are synchronous and fail-safe; standard (business) events are asynchronous with guaranteed delivery via a queue and worker. All audit data lives in the **Platform DB** (AuditEvent, AuditQueue); beacon-tenant owns the audit service, worker, and middleware; the host backend provides platformPrisma and starts the audit worker.
+
+---
+
+## 2. Owning submodule / project
+
+| Layer | Owner | Key files |
+|-------|--------|-----------|
+| Audit types and input | beacon-tenant | `packages/tenant/src/audit/types.ts` |
+| logAuditEvent (direct write) | beacon-tenant | `packages/tenant/src/audit/logAuditEvent.ts` |
+| AuditService (business, security, technical, metrics) | beacon-tenant | `packages/tenant/src/audit/auditService.ts` |
+| AuditWorker (process queue) | beacon-tenant | `packages/tenant/src/audit/auditWorker.ts` |
+| Audit middleware and helpers | beacon-tenant | `packages/tenant/src/audit/auditMiddleware.ts`, `auditHelpers.ts` |
+| Platform DB schema | Beacon backend | `backend/prisma/platform/schema.prisma` (AuditEvent, AuditQueue) |
+| Mount and start worker | Beacon backend | `backend/src/index.ts` |
+
+---
+
+## 3. Requirements summary (from plan)
+
+- **Audit scope:** All create, update, delete (NOT read); sensitive operations must be audited.
+- **Event types:** business, security, technical, metrics.
+- **Event levels:** info, security, error, audit_failure.
+- **Performance:** Sensitive events synchronous (fail-safe); standard events async (guaranteed delivery); bulk batched/summarized.
+- **Data:** Before/after in meta JSON; no passwords/tokens; IP/user agent in meta; immutability.
+- **Retention & access:** 2 months (planned); CSV export; encryption at rest; tenant admins = tenant logs; platform admins = all logs.
+
+---
+
+## 4. Current implementation
+
+- **AuditEvent schema:** Platform DB; event_type (business | security | technical | metrics), level, module, action, entity_type, entity_id, user_id, tenant_id, description, meta (JSON), correlation_id, request_id, etc.
+- **AuditService:** getAuditService(prisma); logSecurityEvent (sync, fail-safe); logBusinessEvent, logTechnicalEvent, logMetricsEvent (async via queue). Queue writes to AuditQueue; worker processes and calls logAuditEvent.
+- **logAuditEvent:** Direct insert into AuditEvent (used by security path and by worker).
+- **AuditWorker:** Processes AuditQueue, calls logAuditEvent; started by backend with platformPrisma.
+- **auditMiddleware:** Captures request metadata; can log CUD operations (integration with routes).
+- **auditHelpers:** auditCreate, auditUpdate, auditDelete, auditSecurity (re-exported for app use).
+
+---
+
+## 5. Rules and guidelines
+
+| Rule | Description |
+|------|-------------|
+| Platform DB only | AuditEvent, AuditQueue live in Platform DB; use platformPrisma only. |
+| Security events synchronous | User auth, permission changes: use logSecurityEvent or equivalent; operation must fail if audit fails. |
+| Business events async | Standard CUD: use AuditService.logBusinessEvent or auditHelpers; events queued and processed by worker. |
+| No sensitive data in audit | No passwords, tokens in meta; financial details allowed per policy. |
+| Immutability | Audit events are read-only after creation; no update/delete of audit records. |
+
+---
+
+## 6. Not yet implemented
+
+- **Retention:** 2-month retention policy and automated purge/archive.
+- **Export:** CSV export for audit log.
+- **Encryption:** Explicit encryption-at-rest for audit storage (may be handled by DB).
+- **Access control:** Tenant admin = all tenant logs; platform admin = all logs; users = no log access (enforced in audit routes).
+- **Dashboard:** Event velocity, events by level/module, top users, recent security events on audit log page.
+- **Full-text search** on description.
+- **Health checks** for audit system (queue depth, failure rate, worker health).
+- **Route-level audit config:** Mark routes as audit: 'business' | 'security' | 'none'; automatic before/after capture for all CUD routes.
+- **Error logging:** Separate error logging system when audit system fails (plan).
+
+---
+
+## 7. References
+
+- Platform DB: PLATFORM_AND_APP_DATABASES.mdc.
+- Beacon comprehensive audit plan: Beacon `.cursor/plans/comprehensive_audit_system_implementation.plan.md`.

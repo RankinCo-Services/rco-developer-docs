@@ -2,6 +2,8 @@
 
 This document defines **architecture, services layer, database, and auth** rules for Beacon and Beacon-based apps (3-app model: beacon-tenant, beacon-app-layout, app). The security-compliance subagent applies these rules **in addition to** the generic security rules when reviewing Beacon or Beacon-based codebases.
 
+**When to apply:** These rules are **mandatory** for all commits, pushes, deploys, and for any Cursor plans and solution planning. An architecture review against this document must be run before every commit and deploy.
+
 **References:** Architecture Refactor Plan, beacon-tenant/docs/SERVICES_LAYER_ARCHITECTURE.md, Beacon docs/ARCHITECTURE_ANALYSIS.md, PLATFORM_APP_DB_CUTOVER.md, AUTH_AND_AUTHORIZATION_FLOW.md.
 
 ---

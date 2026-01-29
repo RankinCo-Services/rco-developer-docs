@@ -1,0 +1,127 @@
+---
+description: AUTHORITATIVE source for creating a new app in RankinCo Services: scaffold, Render, app stub, add to existing platform.
+globs: ["**/create-new-app*", "**/minimal-beacon*", "**/render-create-project*", "**/app-stub*"]
+---
+
+# AUTHORITATIVE – New-App Creation / App Stub
+
+This document is the **source of truth** for creating a new app in RankinCo Services and for the app-stub pattern. It is maintained in rco-developer-docs **docs/**; the copy script copies it to project **docs/rco-standards/** and to **.cursor/references/**.
+
+**Derived from:** setup-new-app docs (CREATE-APP-RUNBOOK.md, ADDING_APP_TO_EXISTING_PLATFORM.md, BEACON_PLATFORM_DEPLOYMENT_GUIDE.md), scripts (create-new-app.sh, minimal-beacon-pattern.sh, render-create-project-and-group.sh), Beacon docs/APP_STUB_IMPLEMENTATION_SUMMARY.md. Reflects current scripts and runbooks.
+
+---
+
+## 1. Description
+
+**New-app creation** has two phases: (1) **PHASE 1** — Create GitHub repo and scaffold (Beacon pattern: Express+Prisma, Vite+React+TS, beacon-tenant, beacon-app-layout, optional beacon-app-stub); (2) **PHASE 2** — Create Render project and services (-db, -api, -frontend), set env (DATABASE_URL, VITE_API_URL, Clerk), SPA rewrite. **One-command:** `create-new-app.sh <ORG> <APP_NAME> <OWNER_ID>` runs PHASE 1 then PHASE 2 with `--no-prompt` when secrets are in `--secrets-file` or env. **App stub** provides standardized app structure, onboarding workflow, and seeding integration for new apps.
+
+---
+
+## 2. Prerequisites
+
+| Requirement | Notes |
+|-------------|-------|
+| **gh** | `gh auth login`; create repos in the org |
+| **jq**, **curl** | For render-create-project-and-group.sh |
+| **RENDER_API_KEY** | In shell or in secrets file when running render script |
+| **GITHUB_TOKEN** (optional) | For full automation with create-new-app.sh |
+| **CLERK_PUBLISHABLE_KEY**, **CLERK_SECRET_KEY** (optional) | For beacon-pattern; prompt or secrets file |
+
+---
+
+## 3. User inputs
+
+| Input | Example | Where |
+|-------|---------|--------|
+| **ORG** | RankinCo-Services | GitHub org or user |
+| **APP_NAME** | my-app | Display name; spaces → hyphens for repo/Render slug |
+| **OWNER_ID** | tea-d5qerqf5r7bs738jbqmg | Render workspace id (RankinCo Services) |
+| **DATABASE_URL** | *(after PHASE 2)* | Render → {APP_NAME}-db → Info → Internal Database URL; or from connection-info API |
+
+---
+
+## 4. Order (do not reorder)
+
+1. **PHASE 1** — Create GitHub repo and scaffold. Run from **setup-new-app**.
+2. **PHASE 2** — Run **render-create-project-and-group.sh** with `--create-services` (and `--variant=beacon-pattern` or `--variant=smoke`). Creates Postgres, web, static; groups; sets env and SPA rewrite. DATABASE_URL from Render connection-info when possible, else prompt (or `--no-prompt` + secrets).
+
+**One-command (Beacon-pattern):**  
+`./scripts/create-new-app.sh <ORG> <APP_NAME> <OWNER_ID> [PARENT] [--secrets-file PATH]`  
+Runs PHASE 1 then PHASE 2 with `--no-prompt`. Use `./.cursor/render-secrets` (or `--secrets-file`) with `RENDER_API_KEY`, `CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, `GITHUB_TOKEN`, and optionally `DATABASE_URL`.
+
+---
+
+## 5. Beacon-pattern scaffold (PHASE 1)
+
+From **setup-new-app** root:
+
+```bash
+./scripts/minimal-beacon-pattern.sh <ORG> <APP_NAME> [PARENT]
+```
+
+- Creates **PARENT/APP_NAME** (default `$HOME/GitHub/APP_NAME`), GitHub repo, branches (develop/staging/main), Beacon scaffold with app stub integration.
+- Includes **beacon-app-stub** submodule when repo exists (standardized app structure, onboarding, seeding).
+- Dual-DB default: platform DB (identity, RBAC, tenant settings, audit) and app DB (business data). Single-DB: set only DATABASE_URL; API falls back for platform.
+
+---
+
+## 6. Render (PHASE 2)
+
+From **setup-new-app**, with **RENDER_API_KEY** set:
+
+```bash
+./scripts/render-create-project-and-group.sh <APP_NAME> <OWNER_ID> https://github.com/<ORG>/<APP_NAME> --create-services --variant=beacon-pattern
+```
+
+- Creates **{APP_NAME}-db**, **-api**, **-frontend** with canonical build/start/publish.
+- Creates project, assigns services, sets **VITE_API_URL**, adds SPA rewrite `/*` → `/index.html`.
+- Prompts for Internal Database URL (paste when ready or Enter to skip and set later) and Clerk keys (optional).
+- **beacon-pattern** creates two Postgres by default (`{APP_NAME}-platform-db`, `{APP_NAME}-db`) and sets PLATFORM_DATABASE_URL and DATABASE_URL on the API.
+
+---
+
+## 7. App stub vs full Beacon
+
+| | App stub (new apps) | Full Beacon (PSA) |
+|--|---------------------|-------------------|
+| **Purpose** | Standardized scaffold, onboarding, seeding | Full PSA business logic (projects, time, invoicing) |
+| **Structure** | beacon-app-stub: AppShell, onboarding pages, seedingService, OnboardingGuard | Beacon frontend: full feature set |
+| **Onboarding** | Welcome → seeding → wizard (tenant stub, app company info, user stub) → complete | Same pattern; company info saved to TenantSettings |
+| **Seeding** | Platform seeding (default roles) + app seeding (if app provides seed function) | Same; app-specific seed in backend |
+
+New apps created via **minimal-beacon-pattern.sh** use **@beacon/app-stub** (when submodule present) for consistent onboarding and seeding.
+
+---
+
+## 8. Adding an app to an existing platform (multi-app)
+
+**Current state:** Schema supports App and TenantAppSubscription (see [MULTI_APP_SUPPORT.mdc](MULTI_APP_SUPPORT.mdc)). **Standalone** pattern: each app is a separate deployment (own repo, Render services, DB). **Multi-app platform** (one platform, multiple apps, app switcher) requires backend APIs (apps, tenant-subscriptions), service layer, and app switcher UI — not yet implemented. To **deploy a new standalone app**, use create-new-app.sh / minimal-beacon-pattern + render script as above.
+
+---
+
+## 9. AI / Cursor one-line prompt
+
+When the user says: **"create a new app in RankinCo Services named \<app name\>"**:
+
+1. Run from **setup-new-app**:  
+   `./scripts/create-new-app.sh RankinCo-Services "<app name>" tea-d5qerqf5r7bs738jbqmg`
+2. If output contains **DATABASE_URL not set (--no-prompt)**: fetch connection-info from Render (postgres API), set DATABASE_URL on API service env, then trigger redeploy. See CREATE-APP-RUNBOOK.md for exact API steps.
+
+---
+
+## 10. Owning project
+
+**setup-new-app** (scripts and runbooks). **Beacon** (app stub implementation summary, onboarding docs). **beacon-tenant** (seeding route, tenant-settings, platform bootstrap).
+
+---
+
+## 11. Not yet implemented
+
+- **Multi-app platform:** Register new app with existing platform DB; assign tenants to apps via UI; app switcher. See MULTI_APP_SUPPORT.mdc.
+
+---
+
+## 12. Derived from
+
+- **setup-new-app:** docs/CREATE-APP-RUNBOOK.md, ADDING_APP_TO_EXISTING_PLATFORM.md, BEACON_PLATFORM_DEPLOYMENT_GUIDE.md; scripts/create-new-app.sh, minimal-beacon-pattern.sh, render-create-project-and-group.sh.
+- **Beacon:** docs/APP_STUB_IMPLEMENTATION_SUMMARY.md.

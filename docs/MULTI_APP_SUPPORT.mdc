@@ -1,0 +1,90 @@
+---
+description: AUTHORITATIVE source for Beacon multi-app support (App, TenantAppSubscription, app-scoped permissions). Current state and not-yet-implemented (app switcher, subscription APIs).
+globs: ["**/App*", "**/TenantAppSubscription*", "**/requirePermission*", "**/permissions/catalog*"]
+---
+
+# AUTHORITATIVE – Multi-App Support
+
+This document is the **source of truth** for multi-app support on the Beacon platform. It is maintained in rco-developer-docs **docs/**; the copy script copies it to project **docs/rco-standards/** and to **.cursor/references/**.
+
+**Derived from:** Beacon docs/MULTI_APP_SUPPORT_ANALYSIS.md, Beacon backend prisma/platform/schema.prisma (App, TenantAppSubscription), beacon-tenant permissions catalog and requirePermission middleware. Reflects current code and identified gaps.
+
+---
+
+## 1. Description
+
+Multi-app support allows **one Beacon platform** to host **multiple applications** (e.g. PSA, Reg E tracking, Card Fraud tracking). Tenants can be **subscribed** to one or more apps; permissions are **app-scoped** via `app_id` and namespace (e.g. `psa:financial:invoices:view`). **Current state:** Schema and permission model support multiple apps; **app switcher UI**, **subscription APIs**, and **subscription-gated route checks** are not yet implemented.
+
+---
+
+## 2. Current state (implemented)
+
+### 2.1 Database schema (Platform DB)
+
+- **App** (platform schema): `id`, `namespace` (unique, e.g. `psa`), `name`, `description`, `is_active`, `created_at`, `updated_at`. Relations: `tenantSubscriptions`, `permissions`, `roles`.
+- **TenantAppSubscription**: `id`, `tenant_id`, `app_id`, `is_active`, timestamps. Unique `[tenant_id, app_id]`. Cascade delete with Tenant and App.
+- **Permission**: has `app_id` (nullable for platform-scoped permissions). App-scoped permissions link to App.
+- **Role**: has `app_id` (nullable). App-scoped roles link to App.
+
+**Location:** Beacon `backend/prisma/platform/schema.prisma` (and schema.platform.prisma).
+
+### 2.2 Permission system (app-scoped)
+
+- Permissions use **namespaces** that include app prefix: e.g. `psa:financial:invoices:view`, `platform:platform-admin:tenants:view`.
+- `requirePermission` in beacon-tenant checks permission and can scope by app; permission catalog defines app-scoped permissions.
+- **Status:** Permission checking is app-aware; middleware does not yet enforce TenantAppSubscription (e.g. block access if tenant not subscribed to app).
+
+### 2.3 Platform admin placeholder
+
+- Subscriptions page exists as stub: "Subscription management coming soon" (or similar). No CRUD for apps or tenant subscriptions.
+
+---
+
+## 3. Owning submodule / project
+
+| Concern | Owner | Location |
+|---------|--------|----------|
+| App, TenantAppSubscription schema | Beacon backend (platform schema) | `backend/prisma/platform/schema.prisma` |
+| Permission app_id, role app_id | Beacon backend (platform schema) | Same |
+| requirePermission middleware | beacon-tenant | `packages/tenant/src/middleware/requirePermission.ts` |
+| Permission catalog (namespaces) | beacon-tenant | `packages/tenant/src/permissions/catalog.ts` |
+| Apps/subscriptions APIs (future) | beacon-tenant | `packages/tenant/src/routes/` (apps.ts, subscriptions.ts) |
+| App switcher UI (future) | beacon-tenant-ui or app | TBD |
+
+---
+
+## 4. Workflows (current vs future)
+
+**Current:** Single-app usage only. Tenant selects tenant; no app selection. Navigation and routes assume one app (e.g. PSA).
+
+**Future (not yet implemented):**
+- Platform admin: CRUD apps; assign tenants to apps (TenantAppSubscription).
+- Tenant: After tenant selection, see list of subscribed apps; choose app (e.g. PSA or Reg E) → navigate to that app’s routes.
+- Route guard: Before serving app-scoped routes, verify tenant has active TenantAppSubscription for that app.
+
+---
+
+## 5. Rules / parameters
+
+- **App.namespace** must be unique (e.g. `psa`, `reg-e`, `card-fraud`). Used in permission namespaces.
+- **TenantAppSubscription** is many-to-many: a tenant can have multiple apps, an app can have multiple tenants.
+- Permission and Role **app_id** null = platform-level; non-null = app-scoped. App-scoped permissions belong to one App.
+
+---
+
+## 6. Not yet implemented
+
+- **Backend API routes:** `GET/POST/PUT/DELETE /api/apps`, `GET/POST/DELETE /api/tenant-subscriptions` (or equivalent). To live in beacon-tenant routes.
+- **Platform admin UI:** App management page, subscription management page (assign apps to tenants).
+- **Tenant app selection / app switcher:** UI for tenants to see subscribed apps and switch between them (e.g. like TenantSwitcher).
+- **Navigation filtering:** Filter navigation by subscribed apps; show only sections for current app.
+- **Service layer:** `appsService`, `subscriptionsService` in @beacon/tenant-ui; methods to get tenant’s subscribed apps and check access.
+- **App context/state:** App store or context to track current app; app-scoped state.
+- **Subscription check in middleware:** requirePermission (or new middleware) to verify tenant has active TenantAppSubscription for the app implied by the route/permission.
+
+---
+
+## 7. Derived from
+
+- **Docs:** Beacon `docs/MULTI_APP_SUPPORT_ANALYSIS.md`.
+- **Code:** Beacon `backend/prisma/platform/schema.prisma` (App, TenantAppSubscription, Permission.app_id, Role.app_id); beacon-tenant `packages/tenant/src/middleware/requirePermission.ts`, `packages/tenant/src/permissions/catalog.ts`.

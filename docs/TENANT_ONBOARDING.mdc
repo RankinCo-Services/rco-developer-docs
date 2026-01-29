@@ -1,0 +1,114 @@
+---
+description: AUTHORITATIVE source for tenant onboarding workflow: creation, approval, welcome, seeding, wizard, completion; invitation flow.
+globs: ["**/onboarding/**", "**/OnboardingGuard*", "**/AcceptInvitation*", "**/PendingAuthorization*", "**/seeding*"]
+---
+
+# AUTHORITATIVE – Tenant Onboarding Workflow
+
+This document is the **source of truth** for the tenant onboarding workflow on the Beacon platform. It is maintained in rco-developer-docs **docs/**; the copy script copies it to project **docs/rco-standards/** and to **.cursor/references/**.
+
+**Derived from:** Beacon docs/ONBOARDING_WORKFLOW.md, APP_STUB_IMPLEMENTATION_SUMMARY.md, MIGRATION_ONBOARDING_COMPLETED.md; beacon-tenant (AcceptInvitationPage, PendingAuthorizationPage, tenant-settings route, seeding route); beacon-app-stub (OnboardingGuard, onboarding pages). Reflects current code.
+
+---
+
+## 1. Description
+
+The Beacon platform includes a **tenant onboarding workflow** that guides new tenants and users through initial setup. It consists of: (1) **Tenant creation** (user signs up, creates tenant; `onboarding_completed = false`); (2) **Tenant approval** (platform admin sets `is_authorized = true`); (3) **First user login** → redirect to `/onboarding/welcome` → seeding (platform + app) → redirect to `/onboarding/wizard`; (4) **Wizard** (tenant stub, app company info, user stub, review & complete); (5) **Completion** (`onboarding_completed = true`, redirect to app). A separate **invitation flow** allows invited users to accept an invite and land on tenant selection or pending authorization.
+
+---
+
+## 2. Workflow (current state)
+
+### 2.1 Tenant creation
+
+- User signs up and creates a tenant.
+- **TenantSettings.onboarding_completed** is set to **false** automatically (backend/beacon-tenant on tenant creation).
+- Tenant is created with **is_authorized = false** (unless first tenant in system).
+
+### 2.2 Tenant approval
+
+- Platform admin approves the tenant (platform-admin UI).
+- **is_authorized** is set to **true**.
+- Tenant is ready for onboarding.
+
+### 2.3 First user login (authorized tenant, onboarding_completed = false)
+
+1. User is redirected to **/onboarding/welcome**.
+2. Welcome page shows "Getting things ready for you..." (or similar).
+3. **Seeding** is triggered automatically:
+   - **Platform seeding:** Default roles (e.g. Admin, User).
+   - **App seeding:** App-specific data (if app provides seeding function).
+4. After seeding completes, user is redirected to **/onboarding/wizard**.
+
+### 2.4 Onboarding wizard
+
+| Step | Implementation | Notes |
+|------|----------------|--------|
+| **Tenant onboarding** | Stub | Placeholder; "Next" to continue. |
+| **App onboarding** | Full | Company info form: Legal Name, Display Name, Address (Line 1, 2, City, State, Postal Code, Country). Saved to **TenantSettings**. |
+| **User onboarding** | Stub | Placeholder; "Next" to continue. |
+| **Review & complete** | Full | "Complete Setup" sets **onboarding_completed = true** and navigates to app default route (or afterCreateTenantPath). |
+
+### 2.5 Completion
+
+- **onboarding_completed** is set to **true** (via PUT /api/tenant-settings or equivalent).
+- User is redirected to the app.
+- Future logins skip onboarding and go directly to the app.
+
+---
+
+## 3. Invitation flow
+
+- **Accept invitation:** beacon-tenant-ui provides **AcceptInvitationPage**; user follows invite link, accepts, and is associated with tenant.
+- **Pending authorization:** If tenant is not yet authorized, **PendingAuthorizationPage** is shown (user waits for platform admin approval).
+- After acceptance (and if tenant is authorized), user can select tenant and proceed; if onboarding_completed is false, onboarding flow runs on first login as above.
+
+---
+
+## 4. Owning submodule / project
+
+| Concern | Owner | Location |
+|---------|--------|----------|
+| Tenant creation (onboarding_completed = false) | beacon-tenant | tenants route (set on create) |
+| TenantSettings (onboarding_completed) | Platform schema; beacon-tenant | tenant-settings route |
+| Seeding (platform + app) | beacon-tenant | seeding route (e.g. /api/tenants/:tenantId/seed) |
+| OnboardingGuard, welcome, wizard pages | beacon-app-stub (or app) | OnboardingGuard, /onboarding/welcome, /onboarding/wizard |
+| Accept invitation, Pending authorization | beacon-tenant-ui | AcceptInvitationPage, PendingAuthorizationPage |
+
+---
+
+## 5. API endpoints (current)
+
+- **GET /api/tenant-settings** — Get current tenant's settings (includes **onboarding_completed**). Context-based (requireTenant); no :tenant_id in URL.
+- **PUT /api/tenant-settings** — Update tenant settings (can set **onboarding_completed**).
+- **POST /api/tenants/:tenantId/seed** — Trigger seeding for a tenant (platform + app seed).
+
+---
+
+## 6. Onboarding guard
+
+The **OnboardingGuard** component (from @beacon/app-stub or app) redirects users to onboarding when **onboarding_completed** is false for the current tenant. The app wraps protected routes with OnboardingGuard so that first-time users are sent to /onboarding/welcome.
+
+---
+
+## 7. Database schema
+
+- **TenantSettings** (platform schema): **onboarding_completed** Boolean @default(false).
+- **Tenant**: **is_authorized** (boolean) — platform admin sets true when tenant is approved.
+
+---
+
+## 8. Not yet implemented
+
+- **Tenant onboarding (full):** Billing, add users, etc. — currently stub.
+- **User onboarding (full):** User preferences, theme, name, title — currently stub.
+- **Skip option:** Allow users to skip onboarding and complete later.
+- **Progress saving:** Save onboarding progress so users can complete later.
+
+---
+
+## 9. Derived from
+
+- **Beacon:** docs/ONBOARDING_WORKFLOW.md, APP_STUB_IMPLEMENTATION_SUMMARY.md, MIGRATION_ONBOARDING_COMPLETED.md.
+- **beacon-tenant:** packages/tenant/src/routes/tenants.ts (onboarding_completed on create), tenant-settings route, seeding route; packages/tenant-ui AcceptInvitationPage, PendingAuthorizationPage.
+- **beacon-app-stub:** OnboardingGuard, onboarding pages (welcome, wizard), seedingService.

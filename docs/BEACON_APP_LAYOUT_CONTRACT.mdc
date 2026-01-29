@@ -1,0 +1,114 @@
+---
+description: AUTHORITATIVE contract for @beacon/app-layout: peer deps, navigation, layout APIs, RBAC UI (PageGuard, ActionGuard), build/versioning.
+globs: ["**/beacon-app-layout/**", "**/app-layout/**", "**/AppLayout*", "**/navigation.ts"]
+---
+
+# AUTHORITATIVE – Beacon-App-Layout Contract
+
+This document is the **source of truth** for the contract between **@beacon/app-layout** and consuming apps. It is maintained in rco-developer-docs **docs/**; the copy script copies it to project **docs/rco-standards/** and to **.cursor/references/**.
+
+**Derived from:** beacon-app-layout README.md, package.json, src/AppLayout.tsx, src/navigation.ts, src/NavigationContext.tsx, src/index.tsx, src/beacon-tenant-ui.d.ts. Reflects current code.
+
+---
+
+## 1. Description
+
+**@beacon/app-layout** provides shared layout components, navigation types, and (by contract) RBAC UI for RankinCo apps. The consuming app must supply peer dependencies (@beacon/tenant-ui, React, react-router-dom, Tailwind), navigation config, and wrap the app with NavigationProvider. The layout does not contain business logic or direct tenant API calls; it depends only on @beacon/tenant-ui for TenantSwitcher and UserProfile.
+
+---
+
+## 2. Peer dependencies (consuming app must provide)
+
+| Dependency | Version | Notes |
+|------------|--------|--------|
+| **@beacon/tenant-ui** | >=0.1.0 | Required for full layout (TenantSwitcher, UserProfile). Not on npm; app supplies via submodule/file. |
+| **react** | >=18.0.0 | |
+| **react-dom** | >=18.0.0 | |
+| **react-router-dom** | >=6.0.0 | |
+| **lucide-react** | >=0.200.0 | Icons for navigation. |
+
+**Tailwind CSS:** The app must use Tailwind and include this package's source in `tailwind.config` `content`, e.g.:
+
+```js
+content: [
+  "./src/**/*.{js,ts,jsx,tsx}",
+  "../beacon-app-layout/src/**/*.{js,ts,jsx,tsx}",
+],
+```
+
+---
+
+## 3. Navigation contract
+
+The app keeps **navigation config** (e.g. `config/navigation.ts`) and passes it into **NavigationProvider**. Types are exported from @beacon/app-layout.
+
+### 3.1 Types (from `navigation.ts`)
+
+- **NavTab:** `id`, `label`, `path`, `icon?`, `activePaths?`, `hasMenu?`
+- **NavSection:** `id`, `name`, `path`, `icon`, `tabs` (NavTab[]), `description?`
+- **Level2Nav:** `sectionPath`, `tabs` (NavTab[])
+- **Level3Nav:** `parentPath`, `tabs` (NavTab[])
+
+### 3.2 NavigationConfig (from NavigationContext)
+
+- **navigation:** NavSection[] (top-level sections)
+- **level2Navigation:** Level2Nav[] (second-level tabs per section)
+- **level3Navigation:** Level3Nav[] (third-level tabs per parent)
+
+The app wraps its router with **NavigationProvider** and passes `navigation`, `level2Navigation`, `level3Navigation`. **AppLayout** uses **useNavigation()** and **getLevel2Nav** to render TopTabBar and sidebar.
+
+---
+
+## 4. Layout component APIs (exports)
+
+| Export | Purpose |
+|--------|---------|
+| **AppLayout** | Main layout: CascadingSidebar + MainContent + TopTabBar + Outlet |
+| **CascadingSidebar** | Primary sidebar (uses navigation) |
+| **SecondarySidebar** | Secondary sidebar |
+| **MainContent** | Content area wrapper |
+| **Breadcrumbs** | Breadcrumb trail |
+| **TopTabBar** | Second-level tabs |
+| **PageTabs** | Tab strip for page-level tabs |
+| **Sidebar** | Generic sidebar |
+| **PlatformAdminLayout** | Layout for platform admin section |
+| **PlatformAdminSidebar** | Sidebar for platform admin |
+| **PlatformAdminBreadcrumbs** | Breadcrumbs for platform admin |
+| **ProjectTopTabBar** | Project-scoped top tabs |
+| **NavigationProvider**, **useNavigation** | Context for navigation config |
+| **getCurrentSection**, **getLevel2Nav**, **getLevel3Nav** | Helpers for current section/tabs |
+
+---
+
+## 5. RBAC UI (PageGuard, ActionGuard)
+
+**Contract:** Apps gate pages and actions by permission namespace. **PageGuard** wraps a page and shows content only if the user has the given permission; **ActionGuard** wraps a button/action and enables it only if the user has the given permission. Both use a **permissionNamespace** prop (e.g. `psa:financial:invoices:view`). Permission checks must go through the **service layer** (@beacon/tenant-ui), not direct API calls.
+
+**Current state:** Architecture assigns RBAC UI to beacon-app-layout. If PageGuard/ActionGuard are not yet exported from @beacon/app-layout, they may be implemented in the app or in @beacon/tenant-ui; the contract (permissionNamespace, fail-closed behavior) still applies.
+
+---
+
+## 6. Build and versioning
+
+- **Build:** `npm install --legacy-peer-deps` (peer @beacon/tenant-ui provided by app), then `npm run build`. A type shim **beacon-tenant-ui.d.ts** lets the package build without the real tenant-ui; at runtime the app supplies @beacon/tenant-ui.
+- **Consumption:** Via `file:../beacon-app-layout` (or equivalent) in the app's package.json. Same approach as @beacon/tenant and @beacon/tenant-ui.
+- **Build order (Beacon):** beacon-tenant build → beacon-app-layout build → app frontend build.
+
+---
+
+## 7. Owning project
+
+**beacon-app-layout** (submodule). Consuming apps: Beacon frontend, and any RankinCo app using the 3-app architecture.
+
+---
+
+## 8. Not yet implemented
+
+- **PageGuard / ActionGuard in beacon-app-layout:** If not yet present in the layout package, they are part of the intended contract; apps may implement them locally or receive them from @beacon/tenant-ui in a future release. The authoritative behavior: use permission namespace, fail-closed, via service layer.
+
+---
+
+## 9. Derived from
+
+- **beacon-app-layout:** README.md, package.json, src/AppLayout.tsx, src/navigation.ts, src/NavigationContext.tsx, src/index.tsx, src/beacon-tenant-ui.d.ts.
+- **Beacon frontend:** Imports from @beacon/app-layout (layout components; PageGuard/ActionGuard where used).

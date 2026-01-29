@@ -1,0 +1,103 @@
+---
+description: AUTHORITATIVE source of truth for Beacon dual-database architecture (Platform DB vs App DB, platformPrisma vs appPrisma, table assignment, no FK from App DB to Platform DB).
+globs: ["**/prisma/**", "**/schema*.prisma", "**/platform*", "**/index.ts", "**/platformPrisma", "**/appPrisma"]
+---
+
+# AUTHORITATIVE – Platform and App Databases
+
+This document is the **source of truth** for the Beacon platform dual-database architecture. It is maintained in rco-developer-docs **docs/**; the copy script copies it to project **docs/rco-standards/** and to **.cursor/references/**.
+
+**Derived from:** Platform DB and App DB split plan, ARCHITECTURE_ANALYSIS, ARCHITECTURE_3APP_MODEL, and backend code (index.ts, platform schema, app schema).
+
+---
+
+## 1. Description
+
+The Beacon backend uses **two PostgreSQL databases** and **two Prisma clients**: **Platform DB** (identity, RBAC, app registry, TenantSettings, audit, reference data) and **App DB** (app-domain tables, e.g. PSA: projects, clients, invoices). The backend instantiates **platformPrisma** (from `PLATFORM_DATABASE_URL`) and **appPrisma** (from `DATABASE_URL`), sets `app.set('platformPrisma', platformPrisma)` and `app.set('appPrisma', appPrisma)`, and passes **platformPrisma** into all beacon-tenant routers and middleware. beacon-tenant does not create its own DB client. App-domain tables reference tenants by `tenant_id` (string) only; there are **no foreign keys** from the App DB to the Platform DB.
+
+---
+
+## 2. Owning submodule / project
+
+| Layer | Owner | Key files |
+|-------|--------|-----------|
+| Platform schema | Beacon backend | `backend/prisma/platform/schema.prisma` |
+| App schema | Beacon backend | `backend/prisma/schema.prisma` (app-domain only) |
+| Dual client setup | Beacon backend | `backend/src/index.ts` (platformPrisma, appPrisma, app.set, mount beacon-tenant with platformPrisma) |
+| beacon-tenant routers/middleware | beacon-tenant | All use platformPrisma from `req.app.get('platformPrisma')` |
+
+---
+
+## 3. Data flow
+
+```mermaid
+flowchart LR
+  subgraph backend [Beacon API]
+    platformPrisma[platformPrisma]
+    appPrisma[appPrisma]
+  end
+  subgraph platform_db [Platform DB]
+    Tenant[Tenant]
+    User[User]
+    UTA[UserTenantAssociation]
+    Role[Role]
+    Permission[Permission]
+    TenantSettings[TenantSettings]
+    Audit[AuditEvent/AuditQueue/ErrorLog]
+    App[App/TenantAppSubscription]
+    StateCountry[State/Country]
+  end
+  subgraph app_db [App DB PSA]
+    Person[Person]
+    Client[Client]
+    Project[Project]
+    WorkItem[WorkItem]
+    TimeEntry[TimeEntry]
+    Invoice[Invoice]
+    Other[Other PSA tables]
+  end
+  platformPrisma --> platform_db
+  appPrisma --> app_db
+```
+
+---
+
+## 4. Table assignment
+
+| Platform DB | App DB (PSA) |
+|-------------|--------------|
+| State, Country | Person, Team, TeamMember, Department |
+| Tenant, App, TenantAppSubscription | Client, Contact, Lead, Opportunity, Proposal, Sale, Stage |
+| User, UserTenantAssociation, UserRole | ClientNote, team join tables |
+| Role, Permission, RolePermission, UserPermission | Project, ProjectTeam, WorkItem*, TimeEntry, Timesheet |
+| TenantSettings | Invoice, Account, JournalEntry, JournalLine, Payment |
+| AuditEvent, AuditQueue, ErrorLog | Note, NoteAttachment, CustomFieldDefinition, CustomFieldValue |
+
+**Cross-DB:** TenantSettings.tenant_client_id remains a string; the app resolves Client in the App DB. All app tables keep `tenant_id` (string); no FK to Tenant.
+
+---
+
+## 5. Rules and guidelines
+
+| Rule | Description |
+|------|-------------|
+| Platform DB only for platform tables | Tenant, User, UserTenantAssociation, Role, Permission, TenantSettings, AuditEvent, App, TenantAppSubscription, State/Country, etc. Use **platformPrisma** only. |
+| App DB only for app-domain tables | Project, Client, Invoice, TimeEntry, etc. Use **appPrisma** only. |
+| No FK from App DB to Platform DB | App tables reference tenants by `tenant_id` (string) only. Do not add foreign keys from App DB to Platform DB. |
+| beacon-tenant receives platformPrisma | The host backend passes platformPrisma into all beacon-tenant create*Router and middleware. beacon-tenant does not instantiate its own Prisma client for the platform DB. |
+| Env vars | PLATFORM_DATABASE_URL for Platform DB; DATABASE_URL for App DB. Both must be set in Render and pre-deploy/CI. |
+
+---
+
+## 6. Not yet implemented
+
+- **Physical DB split (if applicable):** The plan had migrations-platform and migrations-app (and cutover) cancelled. If the current deployment still uses a single Postgres instance for both schemas, document that. When splitting into two physical databases, create Platform DB, add platform migrations, trim app schema and migrations, set PLATFORM_DATABASE_URL and DATABASE_URL, and verify tenant onboarding, auth, and key flows.
+- **Data migration:** If moving from a single DB to two DBs, a one-time data migration and cutover procedure is required (see plan for phases).
+
+---
+
+## 7. References
+
+- Architecture (3-app model, dual DB summary): ARCHITECTURE_3APP_MODEL.md, ARCHITECTURE_ANALYSIS.md.
+- Environment and secrets: ENVIRONMENT_AND_SECRETS.md (PLATFORM_DATABASE_URL, DATABASE_URL).
+- Database migrations: DATABASE_MIGRATIONS.md (platform vs app migrations).

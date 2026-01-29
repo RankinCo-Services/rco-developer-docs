@@ -1,0 +1,34 @@
+---
+description: Mandatory deploy workflow for RCO projects - ESLint, security, architecture, deploy script, monitor Render
+alwaysApply: true
+---
+
+# RCO Deploy Workflow
+
+## Mandatory deploy workflow (when user says "deploy" or "deploy all")
+
+**Exact workflow every time:** ESLint (zero errors) → security compliance → architecture review → run the project's deploy script → monitor Render and fix errors. When the user says **"deploy"** or **"deploy all"**, you **must** execute this full workflow. Do not only suggest commands.
+
+**Goal (unless the user says otherwise):** Run the entire pipeline deployment to Render and fix issues until the services are live. Do not consider the workflow complete until the relevant Render services are live or the user indicates otherwise.
+
+**Steps (in order):**
+
+1. **ESLint** — Zero errors (warnings OK). Run `npm run lint:fix` and `npm run lint:security:fix` in backend and/or frontend as needed. Verify with `npm run lint` and `npm run lint:security`. Fix all errors; rerun until zero errors. (For **deploy all** with submodules, also run `npm run lint` in each submodule that has changes so all code being committed is lint-clean.)
+2. **Security compliance** — Run per `.cursor/agents/security-compliance.md` and `.cursor/skills/security-review-before-commit/SKILL.md`. Produce and show the compliance report. If FAIL, fix or document exceptions; rerun until PASS. (For **deploy all**, the diff you review must include all changed code: run `git diff` / `git diff --staged` in the main repo and in each submodule that has changes.)
+3. **Architecture review** — For **Beacon or Beacon-based apps** (3-app model), ensure code complies with `.cursor/references/beacon-architecture-rules.md`. For other projects, apply any project-specific architecture rules. Make any recommended changes for compliance. (For **deploy all**, review changed code in submodules too.)
+4. **Commit and push** — When all checks pass and code is compliant, run the **project's deploy script** (e.g. `./deploy "message"` for single-repo, or `./scripts/deploy-all.sh "message"` for cross-repo with submodules). The deploy script typically runs pre-deploy checks (unless `--skip-checks`). Use the script and paths defined in the project (see project README or DEPLOYMENT.md).
+5. **Monitor Render** — Use Render MCP per `.cursor/rules/render-deployment-workflow.mdc`: `list_workspaces`, `select_workspace` (RankinCo Services), then `list_deploys`, `list_logs` (build and service), `get_deploy`. Review logs and fix any errors that prevent services from going live. Repeat (fix → commit/push or redeploy → monitor) until services are live.
+
+**Security and architecture reviews are mandatory** for all commits, pushes, deploys, and for any Cursor plans and solution planning. All committed code must comply. Follow this process always unless the user specifies a different workflow for troubleshooting.
+
+---
+
+## After code changes (when user did NOT say "deploy" or "deploy all")
+
+After every code change, or when giving instructions that require the user to implement, resolve, or deploy something:
+
+1. **Output a "Deploy / next steps" section** with:
+   - **Deploy command** with a **commit message you generate** from your recent changes. Do **not** run the deploy script unless the user says "deploy" or "deploy all".
+   - **Additional steps**, if any: If deploy or its scripts do not fully cover what's needed, list the exact implementation steps in order.
+
+2. **When to include extra steps:** Include them whenever the user must do something beyond the deploy command — e.g. run a migration script, run `prisma migrate resolve` in Render Shell, add/change a Render env var, or perform a manual fix before deploying.

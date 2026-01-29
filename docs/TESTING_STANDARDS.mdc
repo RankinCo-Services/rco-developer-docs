@@ -1,0 +1,85 @@
+---
+description: AUTHORITATIVE source for Beacon testing standards: lint/security as gate; unit/integration test expectations and commands.
+globs: ["**/package.json", "**/.eslintrc*", "**/jest*", "**/*.test.*", "**/*.spec.*"]
+---
+
+# AUTHORITATIVE – Testing Standards
+
+This document is the **source of truth** for testing standards on RankinCo projects (Beacon and Beacon-based apps). It is maintained in rco-developer-docs **docs/**; the copy script copies it to project **docs/rco-standards/** and to **.cursor/references/**.
+
+**Derived from:** Beacon .cursor/skills/security-review-before-commit/SKILL.md, Beacon .cursorrules (ESLint mandatory), backend/frontend package.json (test, lint scripts), rco-developer-docs ESLINT_STANDARD.md. Reflects current code.
+
+---
+
+## 1. Description
+
+Testing standards for RankinCo projects include: (1) **Lint and security lint as mandatory gates** before commit and deploy (zero ESLint errors; security compliance report PASS); (2) **Unit/integration test** expectations and commands where present (e.g. Jest). Broader coverage requirements (e.g. cross-tenant isolation tests, minimum coverage) are not yet mandated but are encouraged.
+
+---
+
+## 2. Lint and security as gates (mandatory)
+
+- **ESLint:** Zero errors (warnings OK). Run **npm run lint:fix** and **npm run lint:security:fix** in the relevant packages; verify with **npm run lint** and **npm run lint:security**. For deploy-all with submodules, run lint in each submodule that has changes.
+- **Security compliance:** Run per `.cursor/agents/security-compliance.md` and `.cursor/skills/security-review-before-commit/SKILL.md`. Produce and show the compliance report. If FAIL, fix or document exceptions; rerun until PASS.
+- **Architecture review:** For Beacon/Beacon-based apps: `.cursor/references/beacon-architecture-rules.md`. Make any recommended changes for compliance.
+
+These steps are **mandatory** for all commits, pushes, and deploys. See [DEPLOY_WORKFLOW.mdc](DEPLOY_WORKFLOW.mdc) and [SECURITY_AND_COMPLIANCE_REVIEW.mdc](SECURITY_AND_COMPLIANCE_REVIEW.mdc).
+
+---
+
+## 3. Required npm scripts (per package)
+
+Each package that contains TypeScript/JavaScript source must have:
+
+| Script | Purpose |
+|--------|---------|
+| **lint** | Run ESLint (no fix). Must pass before code is considered complete. |
+| **lint:fix** | Run ESLint with --fix to auto-fix fixable issues. |
+| **lint:security** | Run ESLint with security rules (e.g. eslint-plugin-security). |
+| **lint:security:fix** | Run security ESLint with --fix. |
+
+**Test (optional but recommended):**
+
+| Script | Purpose |
+|--------|---------|
+| **test** | Run unit/integration tests (e.g. Jest). |
+| **test:watch** | Run tests in watch mode. |
+| **test:coverage** | Run tests with coverage report. |
+
+**Current Beacon:** Backend has `test` (jest), `lint`, `lint:fix`, `lint:security`, `lint:security:fix`. Frontend has `lint`, `lint:fix`, `lint:security`, `lint:security:fix`. See [ESLINT_STANDARD.md](ESLINT_STANDARD.md) for full ESLint setup.
+
+---
+
+## 4. Unit / integration tests (current state)
+
+- **Backend:** Beacon backend package.json has **test** (Jest). Run from backend/: `npm test`. No mandated coverage threshold.
+- **Frontend:** Test scripts may be present; run from frontend/: `npm test` (if defined).
+- **Security rules:** Security-compliance subagent and security-review skill evaluate code changes against security rules; this is complementary to automated tests.
+
+---
+
+## 5. Rules / guidelines
+
+- **Do not skip lint or security** before commit/deploy unless the user explicitly approves an exception.
+- **Do not disable security rules** or ignore warnings without explicit approval.
+- **Fix issues immediately** — do not leave ESLint errors or security warnings in the codebase.
+- **Cross-tenant isolation:** Security rules require explicit tenant scoping; automated tests that verify cross-tenant isolation are encouraged (see SECURITY_AND_COMPLIANCE_REVIEW.mdc).
+
+---
+
+## 6. Owning project
+
+**rco-developer-docs** (this doc, ESLINT_STANDARD.md). **Beacon** (.cursorrules, package.json scripts, security skill/agent).
+
+---
+
+## 7. Not yet implemented
+
+- **Broader coverage requirements:** Minimum coverage thresholds, mandatory cross-tenant isolation tests, and mandatory integration test suites are not yet required. Projects are encouraged to add tests and increase coverage over time.
+
+---
+
+## 8. Derived from
+
+- **Beacon:** .cursor/skills/security-review-before-commit/SKILL.md, .cursorrules (ESLint, security), backend/package.json (test, lint), frontend/package.json (lint).
+- **rco-developer-docs:** ESLINT_STANDARD.md, DEPLOY_WORKFLOW.md, SECURITY_AND_COMPLIANCE_REVIEW.mdc.

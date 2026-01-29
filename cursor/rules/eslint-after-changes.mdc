@@ -1,0 +1,18 @@
+---
+description: Run ESLint after every code change; require lint and lint:security in the appropriate directory before considering code complete or recommending commit.
+alwaysApply: true
+---
+
+# ESLint after every code change
+
+- **Mandatory:** After writing or modifying code, the agent **must** run ESLint in the appropriate project/directory. There are no exceptions—every change set must be linted before the agent considers the work complete or recommends commit.
+- **Where to run:** Run in each directory that contains modified code and has lint scripts (e.g. `backend`, `frontend`, or project root; for monorepos or submodules, run in each affected package directory).
+- **Sequence:** For each such directory:
+  1. Run `npm run lint:fix` (or equivalent) to auto-fix fixable issues.
+  2. If the project has a security lint config, run `npm run lint:security:fix` (or equivalent).
+  3. Run `npm run lint` and, if present, `npm run lint:security` to verify. All must pass before considering code complete.
+- **If scripts are missing:** If the project or package has no `lint` / `lint:fix` scripts in package.json, tell the user that ESLint is required for all projects and that setup is needed (see rco-developer-docs docs/ESLINT_STANDARD.md). Do not skip lint for that package; treat it as a blocker until scripts exist or the user explicitly approves an exception.
+- **Fix or document:** If lint or lint:security reports errors or warnings, fix them or clearly document why they cannot be fixed (e.g. approved exception). Do not recommend commit with unfixed lint errors unless the user has explicitly approved an exception.
+- **Do not skip** unless there is a compelling reason. If the agent must skip (e.g. no Node/npm in environment): (1) describe the issue, (2) outline the plan, (3) await explicit user authorization before proceeding.
+
+This rule is always applied so that ESLint runs for every change in every project that uses this config.

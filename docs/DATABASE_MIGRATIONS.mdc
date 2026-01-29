@@ -1,0 +1,102 @@
+---
+description: AUTHORITATIVE source for Beacon database migrations: idempotent SQL, create-then-deploy, platform vs app migrations, pre-deploy validation.
+globs: ["**/prisma/migrations/**", "**/migration*.sql", "**/create-migration*", "**/validate-migration*"]
+---
+
+# AUTHORITATIVE – Database Migrations (Platform vs App)
+
+This document is the **source of truth** for database migrations on the Beacon platform. It is maintained in rco-developer-docs **docs/**; the copy script copies it to project **docs/rco-standards/** and to **.cursor/references/**.
+
+**Derived from:** Beacon docs/05_Database_Migrations.md, MIGRATION_SQL_RULES.md, backend/prisma (schema.prisma, platform/schema.prisma, migrations folders), backend/package.json (prisma:migrate:deploy, prisma:migrate:deploy:platform), scripts/create-migration.sh, validate-migration-sql.sh, migrate.sh, pre-deploy-check.sh, backend/scripts/start.sh. Reflects current code.
+
+---
+
+## 1. Description
+
+Beacon uses **two Prisma schemas** and **two migration paths**: (1) **App DB** — `backend/prisma/schema.prisma`, migrations in `backend/prisma/migrations/`; (2) **Platform DB** — `backend/prisma/platform/schema.prisma`, migrations in `backend/prisma/platform/migrations/`. **All migration SQL must be idempotent** so retries and re-runs don't fail. Migrations are **created locally** (create-only) and **applied on Render** at startup (prisma migrate deploy). Pre-deploy runs **validate-migration-sql.sh** on the newest migration and **blocks deploy** if idempotent patterns are missing.
+
+---
+
+## 2. Idempotent SQL rules (required)
+
+| Pattern | Rule | Example |
+|---------|------|--------|
+| **CREATE TABLE** | Use `IF NOT EXISTS` | `CREATE TABLE IF NOT EXISTS "MyTable" (...)` |
+| **CREATE INDEX** / **CREATE UNIQUE INDEX** | Use `IF NOT EXISTS` | `CREATE INDEX IF NOT EXISTS "idx_name" ON "Table"("col")` |
+| **ALTER TABLE ADD COLUMN** | Wrap in `DO $$ ... IF NOT EXISTS (information_schema.columns) ... END $$` | See MIGRATION_SQL_RULES.md |
+| **ALTER TABLE ADD CONSTRAINT** | Wrap in `DO $$ ... IF NOT EXISTS (pg_constraint) ... END $$` | See MIGRATION_SQL_RULES.md |
+| **DROP TABLE** | Use `IF EXISTS` | `DROP TABLE IF EXISTS "OldTable"` |
+
+Pre-deploy check runs **validate-migration-sql.sh** on the **newest** migration and blocks deploy if these patterns are missing. Use **./scripts/validate-migration-sql.sh --fix [--file path]** to auto-fix CREATE TABLE / CREATE INDEX only.
+
+---
+
+## 3. Two-step process
+
+### Step 1: Create migration locally
+
+- **Recommended:** `./scripts/create-migration.sh <name>` (from Beacon root). Runs from backend/ with `npx prisma migrate dev --create-only --name <name>` (app schema).
+- **Or manually:** `cd backend && npx prisma migrate dev --create-only --name <name>`.
+- Creates folder `prisma/migrations/YYYYMMDDHHMMSS_<name>/` and `migration.sql`. Does **not** apply to a database.
+- **Platform migrations:** Create under `backend/prisma/platform/` using `--schema=./prisma/platform/schema.prisma` and platform migrations folder.
+
+### Step 2: Deploy on Render
+
+- Migration files must be **committed and pushed** so Render can access them.
+- **On service start:** backend **start** script (e.g. `scripts/start.sh`) runs:
+  1. **App migrations:** `npx prisma migrate deploy` (app schema, DATABASE_URL).
+  2. **Platform migrations (dual-DB only):** When PLATFORM_DATABASE_URL is set, runs `npx prisma migrate deploy --schema=./prisma/platform/schema.prisma`.
+- No manual steps on Render for normal deploys; start script applies both.
+
+---
+
+## 4. Platform vs app migrations (current state)
+
+| DB | Schema | Migrations folder | Deploy command |
+|----|--------|-------------------|----------------|
+| **App** | backend/prisma/schema.prisma | backend/prisma/migrations/ | `prisma migrate deploy` (default schema) |
+| **Platform** | backend/prisma/platform/schema.prisma | backend/prisma/platform/migrations/ | `prisma migrate deploy --schema=./prisma/platform/schema.prisma` |
+
+**Single-DB mode:** When PLATFORM_DATABASE_URL is unset, backend uses DATABASE_URL for both; start script runs **only** app migrations to avoid applying platform migrations to the same DB in a conflicting way. **Dual-DB mode:** When PLATFORM_DATABASE_URL is set, start script runs app migrations then platform migrations (and optionally platform data migration script).
+
+---
+
+## 5. Scripts (Beacon)
+
+| Script | Purpose |
+|--------|---------|
+| **create-migration.sh** | Create app migration locally (--create-only). |
+| **validate-migration-sql.sh** | Check migration SQL for idempotent patterns; --fix for CREATE TABLE/INDEX. |
+| **migrate.sh** | Create migration, commit, push (optional all-in-one). |
+| **pre-deploy-check.sh** | Runs validate-migration-sql on newest migration; blocks deploy if invalid. |
+| **backend/scripts/start.sh** | App migrate deploy; then platform migrate deploy (if dual-DB); then node. |
+
+---
+
+## 6. Commands (backend package.json)
+
+| Command | Where | Purpose |
+|---------|--------|---------|
+| **prisma:migrate:dev** | Local | Create new migration (interactive). |
+| **prisma:migrate:deploy** | Render / local | Apply app migrations (non-interactive). |
+| **prisma:migrate:deploy:platform** | Render / local | Apply platform migrations (--schema=platform). |
+
+---
+
+## 7. Owning project
+
+**Beacon** backend (prisma/, scripts/, start.sh). **rco-developer-docs** PLATFORM_AND_APP_DATABASES.mdc for schema ownership.
+
+---
+
+## 8. Not yet implemented
+
+- **Separate physical DB migration cutover procedures:** Documented data migration from single DB to dual DB (e.g. migrate-platform-data.ts) is in use; formal cutover runbook may be expanded.
+- **Unified migration folder for both schemas:** Current approach is two folders (app, platform); a single folder with schema tagging is not implemented.
+
+---
+
+## 9. Derived from
+
+- **Beacon:** docs/05_Database_Migrations.md, MIGRATION_SQL_RULES.md; backend/prisma (schema.prisma, platform/schema.prisma, migrations, platform/migrations); backend/package.json; scripts/create-migration.sh, validate-migration-sql.sh, migrate.sh, pre-deploy-check.sh; backend/scripts/start.sh.
+- **rco-developer-docs:** PLATFORM_AND_APP_DATABASES.mdc.

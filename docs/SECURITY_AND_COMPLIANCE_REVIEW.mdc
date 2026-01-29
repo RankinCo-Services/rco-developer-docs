@@ -1,0 +1,114 @@
+---
+description: AUTHORITATIVE source for mandatory security and architecture review before commit/deploy. Compliance report, PASS/FAIL, security rules and Beacon architecture rules.
+globs: ["**/.cursor/agents/security*", "**/.cursor/skills/security*", "**/.cursor/references/security*", "**/.cursor/references/beacon-architecture*"]
+---
+
+# AUTHORITATIVE – Security and Compliance Review
+
+This document is the **source of truth** for the mandatory security and architecture review used across RankinCo projects. It is maintained in rco-developer-docs **docs/**; the copy script copies it to project **docs/rco-standards/** and to **.cursor/references/**.
+
+**Derived from:** Beacon .cursor/agents/security-compliance.md, .cursor/skills/security-review-before-commit/SKILL.md, .cursor/references/security-rules.md, .cursor/references/beacon-architecture-rules.md, rco-developer-docs DEPLOY_WORKFLOW (steps 2–3). Reflects current Cursor agent/skill and reference files.
+
+---
+
+## 1. Description
+
+Before every **commit, push, and deploy**, code changes must pass a **security compliance review** and (for Beacon/Beacon-based apps) an **architecture review**. The review produces a **compliance report** with result **PASS** or **FAIL**. If FAIL, do not proceed with commit until issues are fixed or exceptions documented. This review is **mandatory** and is part of the deploy workflow (see [DEPLOY_WORKFLOW.mdc](DEPLOY_WORKFLOW.mdc)); it is **complementary** to ESLint and security lint (`npm run lint:security`).
+
+---
+
+## 2. When it runs
+
+- When the user says **"deploy"** or **"deploy all"** — run security compliance and architecture review **before** running the deploy script.
+- When the user asks for a **security review before commit** — run the skill to produce the report.
+- **Mandatory** for all commits, pushes, deploys, and for any Cursor plans and solution planning.
+
+---
+
+## 3. Steps (security review before commit)
+
+1. **Get code changes.** Run `git diff` (unstaged) and `git diff --staged` (staged); include both if relevant.
+2. **Evaluate against security rules.** Read `.cursor/references/security-rules.md`. For each rule that applies to the changed code, check the diff for compliance. Note violations (rule + location + finding).
+3. **For Beacon/Beacon-based apps, also evaluate against architecture rules.** Read `.cursor/references/beacon-architecture-rules.md`. Check architecture boundaries, services layer, database/migrations, auth and middleware order. Cite specific section when a change violates a Beacon rule.
+4. **Produce compliance report.** Result = **PASS** if no violations, **FAIL** if one or more violations. Report must include: Result (PASS/FAIL), Rules checked, Violations (if any), Recommendation (OK to commit / do not commit and list issues to fix).
+5. **Apply result.** If PASS: may recommend commit. If FAIL: do not recommend commit; list violations and remediation; offer to fix or note user-approved exceptions.
+
+---
+
+## 4. Compliance report format
+
+```markdown
+# Security compliance report
+
+## Summary
+- **Result:** PASS | FAIL
+- **Rules checked:** N
+- **Violations:** N
+
+## Findings
+(For each finding: rule, file:line or snippet, severity, brief remediation.)
+
+## Recommendation
+(Proceed with commit / fix before commit / document exception.)
+```
+
+---
+
+## 5. Rules enforced
+
+### 5.1 Generic security rules (all projects)
+
+Apply **all** rules in `.cursor/references/security-rules.md`:
+
+- **Authentication & Authorization:** Fail secure; tenant isolation; authorization never optional; never remove security checks; session data advisory.
+- **Data Handling:** Scope queries by tenant ID; validate tenant ownership on JOINs; sanitize/validate input; limit data exposure.
+- **Error Handling:** No internal details in errors; same error for "not found" vs "no permission" where appropriate; log security events.
+- **API Design:** Default deny; least privilege; endpoints verify authorization independently.
+- **Code Patterns:** Reusable auth middleware; DB-level constraints; separate authn vs authz; no disabling security in production.
+- **Testing & Validation:** Cross-tenant isolation tests; negative test cases; review data access in PRs.
+- **Core Principle:** When in doubt, choose security.
+
+### 5.2 Beacon / Beacon-based apps (secondary rules)
+
+**Also** apply all rules in `.cursor/references/beacon-architecture-rules.md`:
+
+- **Architecture & package boundaries:** Tenant-scoped routes in beacon-tenant; app backend only app-specific routes; correct Prisma client (platformPrisma vs appPrisma); dependency direction (app → layout → tenant).
+- **Services layer:** No direct API calls to tenant-scoped endpoints; use only @beacon/tenant-ui services; no legacy `:tenant_id` routes; tenant context set before service calls; permission checks fail-closed.
+- **Database and migrations:** App DB tenant_id only, no FK to Platform DB; Platform vs App table split; idempotent migration SQL.
+- **Auth and middleware order:** verifyClerkJwt then requireTenant; use req.tenantId for scoping; platform-admin uses requirePlatformAdmin; do not remove auth to fix bugs.
+
+---
+
+## 6. Relationship to deploy workflow
+
+- **Step 1:** ESLint (zero errors).
+- **Step 2:** Security compliance — run per `.cursor/agents/security-compliance.md` and `.cursor/skills/security-review-before-commit/SKILL.md`; produce and show compliance report. If FAIL, fix or document exceptions; rerun until PASS.
+- **Step 3:** Architecture review — For Beacon/Beacon-based apps: `.cursor/references/beacon-architecture-rules.md`. For other projects: project-specific architecture rules. Make any recommended changes for compliance.
+- **Step 4:** Commit and push (deploy script).
+- **Step 5:** Monitor Render.
+
+See [DEPLOY_WORKFLOW.mdc](DEPLOY_WORKFLOW.mdc).
+
+---
+
+## 7. Owning assets (in project after copy)
+
+| Asset | Purpose |
+|-------|---------|
+| `.cursor/agents/security-compliance.md` | Agent definition: evaluate diff against security rules; output compliance report. |
+| `.cursor/skills/security-review-before-commit/SKILL.md` | Skill: get diff, evaluate, produce report, apply result. |
+| `.cursor/references/security-rules.md` | Canonical list of security rules (auth, data, errors, API, code, testing). |
+| `.cursor/references/beacon-architecture-rules.md` | Beacon-specific rules (architecture, services layer, DB, auth). |
+
+---
+
+## 8. Not yet implemented
+
+- No additional items; the process is defined and enforced via agents/skills/references. Broader automated tests (e.g. cross-tenant isolation) are encouraged; see [TESTING_STANDARDS.mdc](TESTING_STANDARDS.mdc).
+
+---
+
+## 9. Derived from
+
+- **Beacon:** `.cursor/agents/security-compliance.md`, `.cursor/skills/security-review-before-commit/SKILL.md`, `.cursor/references/security-rules.md`, `.cursor/references/beacon-architecture-rules.md`.
+- **rco-developer-docs:** DEPLOY_WORKFLOW.md (steps 2–3).

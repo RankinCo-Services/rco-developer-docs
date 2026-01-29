@@ -1,0 +1,154 @@
+---
+description: AUTHORITATIVE source of truth for Beacon authentication and authorization (Clerk, JWT, tenant authorization, RBAC, requireTenant, requirePermission, platform admin).
+globs: ["**/auth/**", "**/ProtectedRoute*", "**/TenantAuthGuard*", "**/verifyClerkJwt*", "**/requireTenant*", "**/requirePermission*", "**/platformAdminAuth*"]
+---
+
+# AUTHORITATIVE – Authentication and Authorization Flow
+
+This document is the **source of truth** for how authentication and authorization work in Beacon and which submodule owns each step. It is maintained in rco-developer-docs **docs/**; the copy script copies it to project **docs/rco-standards/** and to **.cursor/references/**.
+
+**Derived from:** Beacon docs/AUTH_AND_AUTHORIZATION_FLOW.md and code (main.tsx, api.ts, TenantAuthGuard, verifyClerkJwt, tenantAuth, requirePermission, platformAdminAuth).
+
+---
+
+## 1. High-level flow
+
+1. **Authentication** = "Who is this user?" (Clerk identity + JWT).
+2. **Tenant authorization** = "Is this user allowed to use this tenant?" (UserTenantAssociation in Platform DB).
+3. **Permission / RBAC** = "Does this user have permission to do X in this tenant?" (roles, permissions, platform admin).
+
+Ownership:
+
+- **Beacon app (frontend)** – Wires Clerk, API client, routing; owns `ProtectedRoute`, `api` + `setAuthToken`, `configureBeacon`.
+- **beacon-tenant (tenant-ui)** – Auth sync, tenant selection/guard, platform readiness, tenant/permissions services, stores.
+- **beacon-tenant (tenant backend)** – JWT verification, tenant middleware, RBAC middleware, platform-admin middleware, tenant/permissions/roles routes.
+- **beacon-app-layout** – PageGuard (permission-based UI), ActionGuard; uses Clerk + permissions from tenant-ui.
+- **Backend (Beacon repo)** – Mounts tenant routes, provides `platformPrisma` / `appPrisma`, applies middleware order.
+
+---
+
+## 2. Step-by-step: who owns what
+
+### 2.1 App bootstrap and Clerk (frontend)
+
+| Step | What happens | Owner |
+|------|-----------------------|--------|
+| 1 | App calls `configureBeacon({ api, setAuthToken, ... })` so tenant-ui and layout use the app's API client and auth setter. | **Beacon app** (`frontend/src/main.tsx`) |
+| 2 | App wraps the tree in `TenantAuthProvider` with Clerk's publishable key and `api` / `setAuthToken`. | **Beacon app** (`frontend/src/main.tsx`) |
+| 3 | TenantAuthProvider renders Clerk's `ClerkProvider` (Clerk owns sign-in/sign-up UI and session). | **beacon-tenant (tenant-ui)** (`TenantAuthProvider.tsx`) – wraps **Clerk** |
+| 4 | Inside Clerk, tenant-ui renders `AuthSync` so token/user are synced to the API client before any tenant logic. | **beacon-tenant (tenant-ui)** (`AuthSync.tsx`) |
+
+### 2.2 Syncing auth to the API client (frontend)
+
+| Step | What happens | Owner |
+|------|-----------------------|--------|
+| 5 | AuthSync uses Clerk's `useAuth()` / `useUser()` and, when signed in, calls `getToken()` then `setAuthToken(token, user.id)`. | **beacon-tenant (tenant-ui)** (`AuthSync.tsx`) |
+| 6 | `setAuthToken` is the function the app passed in; it sets the axios instance's `Authorization: Bearer <token>` and `x-user-id` header. | **Beacon app** (`frontend/src/services/api.ts`) – implements `setAuthToken`; **tenant-ui** only calls it |
+| 7 | AuthSync sets platform readiness flags: `setClerkReady`, `setUserReady`, `setAuthTokenReady`. | **beacon-tenant (tenant-ui)** (`AuthSync.tsx`, `platformReadyStore`) |
+
+### 2.3 "Is the user signed in?" – protecting routes (frontend)
+
+| Step | What happens | Owner |
+|------|-----------------------|--------|
+| 8 | Routes that require a signed-in user are wrapped in `ProtectedRoute`. | **Beacon app** (`frontend/src/components/auth/ProtectedRoute.tsx`) |
+| 9 | ProtectedRoute uses `useAuth()` from tenant-ui (re-export of Clerk's `useAuth`). If not signed in, redirect to `/sign-in`. | **Beacon app** (component); **beacon-tenant (tenant-ui)** (exports `useAuth` from Clerk) |
+
+### 2.4 Tenant selection and "which tenant am I in?" (frontend)
+
+| Step | What happens | Owner |
+|------|-----------------------|--------|
+| 10 | User hits `/tenants` and picks a tenant (or one is auto-selected). TenantSelectionPage calls tenantService and tenantStore. | **beacon-tenant (tenant-ui)** (`TenantSelectionPage`, `tenantService`, `tenantStore`) |
+| 11 | Current tenant id is stored in `tenantStore` (e.g. `currentTenantId`). Any code that needs "current tenant" reads from this store. | **beacon-tenant (tenant-ui)** (`tenantStore`) |
+
+### 2.5 "Is the user allowed to use this tenant?" – TenantAuthGuard (frontend)
+
+| Step | What happens | Owner |
+|------|-----------------------|--------|
+| 12 | Routes under the main app layout are wrapped in `TenantAuthGuard` (inside ProtectedRoute). So: signed in first (ProtectedRoute), then tenant check (TenantAuthGuard). | **Beacon app** (`App.tsx` – wraps layout with `ProtectedRoute` then `TenantAuthGuard`) |
+| 13 | TenantAuthGuard reads `currentTenantId` from tenantStore. If none, redirects to `/tenants`. | **beacon-tenant (tenant-ui)** (`TenantAuthGuard.tsx`) |
+| 14 | TenantAuthGuard calls `tenantService.getTenants()` (GET /api/tenants) and checks whether the current user is in that list and `isAuthorized` for the selected tenant. | **beacon-tenant (tenant-ui)** (`TenantAuthGuard`, `tenantService`) |
+| 15 | If not authorized (e.g. invited but not accepted), redirect to `/pending-authorization`. If authorized, sets `setTenantAuthorized(true)` and optionally bootstraps permissions (calls `permissionsService.getPermissions()`). | **beacon-tenant (tenant-ui)** (`TenantAuthGuard`, `platformReadyStore`) |
+| 16 | Permissions bootstrap: when tenant is authorized, tenant-ui calls `permissionsService.getPermissions()`. On **success**, the permissions service sets `setPermissionsReady(true)` so `isFullyReady` can become true. | **beacon-tenant (tenant-ui)** (`TenantAuthGuard` triggers; `permissionsService` + `platformReadyStore` set ready) |
+
+### 2.6 Sending tenant context with every API request (frontend)
+
+| Step | What happens | Owner |
+|------|-----------------------|--------|
+| 17 | The app's axios instance has a request interceptor that adds `tenant_id` to query (GET/DELETE) or body (POST/PUT/PATCH) when `currentTenantId` exists and the URL is not a platform-level endpoint. | **Beacon app** (`frontend/src/services/api.ts`) |
+| 18 | Platform-level endpoints (e.g. `/api/tenants`, `/api/platform-admin/*`) do not get `tenant_id` added. | **Beacon app** (`frontend/src/services/api.ts` – PLATFORM_LEVEL_ENDPOINTS) |
+| 19 | The same interceptor can block or queue requests until `canMakeAuthenticatedRequests()` is true (readiness). | **Beacon app** (`api.ts`); readiness state from **beacon-tenant (tenant-ui)** (`platformReadyStore`) |
+
+### 2.7 Backend: "Who is this user?" – JWT verification
+
+| Step | What happens | Owner |
+|------|-----------------------|--------|
+| 20 | Every request to `/api/*` hits `verifyClerkJwt` first (middleware). | **Beacon backend** (`backend/src/index.ts` – mounts middleware); **beacon-tenant (tenant backend)** (implements `verifyClerkJwt`) |
+| 21 | verifyClerkJwt reads `Authorization: Bearer <token>`, verifies the JWT with Clerk's secret, and sets `req.headers['x-user-id']` to the token's `sub` (Clerk user id). Missing/invalid token → 401. | **beacon-tenant (tenant)** (`packages/tenant/src/middleware/verifyClerkJwt.ts`) |
+
+### 2.8 Backend: "Is this user allowed to use this tenant?" – requireTenant
+
+| Step | What happens | Owner |
+|------|-----------------------|--------|
+| 22 | Routes that are tenant-scoped (e.g. `/api/projects`, `/api/people`, `/api/permissions`) use `requireTenant` **after** verifyClerkJwt. | **Beacon backend** (mounts routes with `requireTenant`); **beacon-tenant (tenant)** (implements `requireTenant`) |
+| 23 | requireTenant reads `tenant_id` from query or body and `x-user-id` from headers. It uses **platformPrisma** to check `UserTenantAssociation` (user_id, tenant_id, status = active or invited→active). If no association, responds 403. If ok, sets `req.tenantId`. | **beacon-tenant (tenant)** (`packages/tenant/src/middleware/tenantAuth.ts`) |
+
+### 2.9 Backend: "Does this user have permission to do X?" – requirePermission (optional)
+
+| Step | What happens | Owner |
+|------|-----------------------|--------|
+| 24 | Some routes add `requirePermission('namespace')` (e.g. for granular RBAC). It uses `x-user-id`, `req.tenantId`, and **platformPrisma** to check UserPermission / RolePermission / platform admin. | **beacon-tenant (tenant)** (`packages/tenant/src/middleware/requirePermission.ts`) |
+| 25 | Beacon backend mounts most tenant-scoped routes with `requireTenant`; granular `requirePermission` is available for routes that need it. | **Beacon backend** (route mounting) |
+
+### 2.10 Backend: Platform admin
+
+| Step | What happens | Owner |
+|------|-----------------------|--------|
+| 26 | Routes under `/api/platform-admin/*` use `requirePlatformAdmin` (and usually verifyClerkJwt). It checks platformPrisma (or env) to see if the user is a platform admin. | **beacon-tenant (tenant)** (`packages/tenant/src/middleware/platformAdminAuth.ts`) |
+| 27 | Beacon backend mounts platform-admin routes with `requirePlatformAdmin`. | **Beacon backend** (`backend/src/index.ts`) |
+
+### 2.11 Frontend: "Can this user see this page?" – PageGuard (optional)
+
+| Step | What happens | Owner |
+|------|-----------------------|--------|
+| 28 | Some pages or tabs are wrapped in `PageGuard` with a permission namespace. PageGuard uses permissions from tenant-ui (permissionsService, cache) and, if the user doesn't have that permission (and isn't platform admin), hides or redirects. | **beacon-app-layout** (`PageGuard.tsx`); permissions data from **beacon-tenant (tenant-ui)** |
+| 29 | PageGuard ensures a token is set (getToken) before checking permission. | **beacon-app-layout** (uses Clerk's getToken) |
+
+---
+
+## 3. Summary table
+
+| Layer | Responsibility | Owner |
+|-------|----------------|--------|
+| Identity / session | Clerk sign-in, sign-up, JWT | **Clerk**; app provides key; **tenant-ui** wraps with TenantAuthProvider + AuthSync |
+| Token on API client | setAuthToken(token, userId) → Authorization + x-user-id | **Beacon app** (implements); **tenant-ui** (calls it from AuthSync, TenantAuthGuard, etc.) |
+| "Signed in?" guard | ProtectedRoute → redirect if !isSignedIn | **Beacon app** (component); **tenant-ui** (useAuth) |
+| Tenant list + current tenant | tenantStore, TenantSelectionPage, tenantService | **beacon-tenant (tenant-ui)** |
+| "Authorized for this tenant?" | TenantAuthGuard → getTenants, isAuthorized, setTenantAuthorized, permissions bootstrap | **beacon-tenant (tenant-ui)** |
+| Readiness | platformReadyStore (clerkReady, userReady, authTokenReady, tenantAuthorized, permissionsReady) | **beacon-tenant (tenant-ui)** |
+| tenant_id on requests | Axios interceptor adds tenant_id for non–platform-level URLs | **Beacon app** (api.ts) |
+| Backend: who is the user? | verifyClerkJwt → x-user-id | **beacon-tenant (tenant)** |
+| Backend: tenant access? | requireTenant → UserTenantAssociation, req.tenantId | **beacon-tenant (tenant)** |
+| Backend: permission? | requirePermission (optional) | **beacon-tenant (tenant)** |
+| Backend: platform admin? | requirePlatformAdmin | **beacon-tenant (tenant)** |
+| Frontend: page-level permission? | PageGuard (optional) | **beacon-app-layout** |
+| Route mounting | Which routes use verifyClerkJwt, requireTenant, requirePermission, requirePlatformAdmin | **Beacon backend** |
+
+---
+
+## 4. Request flow (one example)
+
+1. User is signed in (Clerk). AuthSync has run → API client has Bearer token and x-user-id.
+2. User has selected a tenant → tenantStore.currentTenantId is set.
+3. User navigates to a tenant-scoped page → TenantAuthGuard has run, verified tenant via GET /api/tenants, set tenantAuthorized and bootstrapped permissions.
+4. Page loads data → e.g. GET /api/projects?tenant_id=xxx. App's interceptor adds tenant_id; request has Authorization and x-user-id.
+5. Backend: verifyClerkJwt → sets x-user-id. requireTenant (on projects router) → checks UserTenantAssociation, sets req.tenantId. Handler uses appPrisma/platformPrisma and returns data.
+
+If any step fails (not signed in, no tenant, not authorized for tenant, or backend 403), the user is redirected or the request returns 401/403; no tenant-scoped data is shown without both authentication and tenant authorization.
+
+---
+
+## 5. References
+
+- RBAC and permissions: RBAC_AND_PERMISSIONS.mdc.
+- Platform readiness: PLATFORM_READINESS_AND_CACHE.mdc.
+- Tenant onboarding (invite → accept → tenant selection): TENANT_ONBOARDING.md.

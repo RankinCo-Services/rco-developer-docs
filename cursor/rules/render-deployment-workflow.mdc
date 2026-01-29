@@ -1,0 +1,111 @@
+---
+description: Render deployment workflow - use MCP tools and existing scripts; always use RankinCo Services workspace
+alwaysApply: true
+---
+
+# Render Deployment Workflow
+
+## Overview
+
+When reviewing deployment errors or managing deployments, use the established Render MCP tools and existing scripts. Do NOT create new tools or scripts - use what already exists.
+
+**We always deploy to the RankinCo Services workspace.** All RCO app services (e.g. beacon-frontend, beacon-api, beacon-db for Beacon; similar for other apps) live in this workspace. Use it for listing services and monitoring deploys.
+
+## Mandatory deploy workflow (when user says deploy)
+
+When the user says **"deploy"** or **"deploy all"**, the full pipeline is defined in `.cursor/rules/deploy-workflow.mdc` (ESLint → security compliance → architecture review → deploy script → monitor). **Security and architecture reviews** are always run before deploy; they are mandatory on all commits and deploys.
+
+**Goal (unless the user says otherwise):** Run the entire pipeline deployment to Render and fix issues until services are live. Do not stop at "push done"; monitor and fix until services are live.
+
+After pushing, you **must** use Render MCP to monitor deployments: `list_deploys`, `list_logs` (build and service logs), `get_deploy`. Review logs and fix any errors that prevent services from going live. If a deploy fails or a service is not live, fix the issue (code, env, or migration), then commit/push or trigger redeploy, then monitor again until live.
+
+**If Render MCP returns "no workspace set" for `list_services`:** Call `list_workspaces` to list all workspaces, then `select_workspace` with the **RankinCo Services** workspace ID (`tea-d5qerqf5r7bs738jbqmg`). Then call `list_services` to get service IDs. You can also use known service IDs (see Service IDs in project or below) to call `list_deploys`, `list_logs`, and `get_deploy` directly.
+
+## Process for Reviewing Deployment Errors
+
+### 1. Find Service ID
+Use Render MCP: `list_workspaces` (to find RankinCo Services if needed), then `select_workspace` with owner ID `tea-d5qerqf5r7bs738jbqmg` (RankinCo Services), then `list_services` to get service IDs. Or query via API:
+```bash
+curl -sS -H "Authorization: Bearer $RENDER_API_KEY" \
+  "https://api.render.com/v1/services?limit=100" | \
+  jq -r '.[] | .service | select(.name == "<service-name>") | .id'
+```
+
+### 2. Check Deployment Status
+Use Render MCP `list_deploys` to see recent deployments:
+```typescript
+call_mcp_tool("user-render", "list_deploys", {
+  serviceId: "srv-...",
+  limit: 5
+})
+```
+
+### 3. Review Build Logs
+Use Render MCP `list_logs` to see build errors:
+```typescript
+call_mcp_tool("user-render", "list_logs", {
+  resource: ["srv-..."],
+  type: ["build"],
+  limit: 100,
+  direction: "backward",
+  startTime: "2026-01-26T18:00:00Z"
+})
+```
+
+### 4. Get Specific Deploy Details
+Use Render MCP `get_deploy` to check status:
+```typescript
+call_mcp_tool("user-render", "get_deploy", {
+  serviceId: "srv-...",
+  deployId: "dep-..."
+})
+```
+
+### 5. Trigger Redeploy
+Use Render API directly (no MCP tool for this):
+```bash
+curl -X POST \
+  -H "Authorization: Bearer $RENDER_API_KEY" \
+  -H "Content-Type: application/json" \
+  "https://api.render.com/v1/services/{serviceId}/deploys" \
+  -d '{"clearCache": "do_not_clear"}'
+```
+
+## Common Issues and Fixes
+
+### Submodule Commit Not Pushed
+**Symptom:** `fatal: Fetched in submodule path '<submodule>', but it did not contain {commit-hash}`
+**Fix:** Push the submodule commit:
+```bash
+cd <submodule> && git push origin main
+```
+
+### TypeScript Build Errors
+**Symptom:** Build fails with TS errors
+**Fix:** Fix errors locally, commit, then redeploy
+
+### Missing Dependencies
+**Symptom:** `command not found: tsc` or similar
+**Fix:** Ensure `npm install` runs before build in the build command
+
+## Important Notes
+
+- **We always deploy to RankinCo Services workspace** — Use `list_workspaces` and then `select_workspace` (RankinCo Services, `tea-d5qerqf5r7bs738jbqmg`) to list any RCO service.
+- **DO NOT** create new build scripts - use existing ones
+- **DO NOT** create new deployment tools - use Render MCP and existing scripts
+- **ALWAYS** check Render logs via MCP before making changes
+- **ALWAYS** push submodule commits before deploying if main repo references them
+- **ALWAYS** use the project's deploy-all script for cross-repo changes (e.g. `deploy-all.sh` for Beacon)
+
+## Workspace
+
+**We always deploy to RankinCo Services.** Use this workspace for all RCO deployment and monitoring.
+
+- **Workspace:** RankinCo Services  
+- **Owner ID:** `tea-d5qerqf5r7bs738jbqmg`
+
+To list or monitor services: call `list_workspaces` to see all workspaces, then `select_workspace` with the RankinCo Services workspace ID above, then `list_services` to list any service. You can always use RankinCo Services workspace to list any RCO app service.
+
+## Service IDs (project-specific)
+
+Each project may document its Render service IDs (e.g. in project docs or `.cursor/rules`). Example for Beacon: beacon-frontend `srv-d5r240coud1c73eftvbg`, beacon-api and beacon-db via `list_services` after selecting RankinCo Services.

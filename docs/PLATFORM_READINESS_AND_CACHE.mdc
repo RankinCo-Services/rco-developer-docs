@@ -1,0 +1,75 @@
+---
+description: AUTHORITATIVE source of truth for Beacon platform readiness (auth, tenant, permissions) and global cache (future). Components must wait for readiness before loading data.
+globs: ["**/platformReadyStore*", "**/usePlatformReady*", "**/TenantAuthGuard*", "**/AuthSync*", "**/platformCacheStore*", "**/cacheService*"]
+---
+
+# AUTHORITATIVE – Platform Readiness and Cache
+
+This document is the **source of truth** for the Beacon platform readiness system and (planned) global cache. It is maintained in rco-developer-docs **docs/**; the copy script copies it to project **docs/rco-standards/** and to **.cursor/references/**.
+
+**Derived from:** Platform Readiness & Global Cache plan, Beacon docs/PLATFORM_READINESS.md, and code (platformReadyStore, TenantAuthGuard, usePlatformReady).
+
+---
+
+## 1. Description
+
+The **platform readiness system** ensures that foundational services (authentication, tenant authorization, permissions) are fully initialized before components attempt to load tenant-scoped data. This prevents race conditions and 401 errors. beacon-tenant (tenant-ui) owns the readiness store, flags, and `usePlatformReady()` hook. Data-loading components **must** wait for readiness (e.g. `canLoadTenantData`) before loading data. A **global cache** (permissions, roles, user details) with TTL and invalidation is planned but not fully implemented.
+
+---
+
+## 2. Owning submodule / project
+
+| Layer | Owner | Key files |
+|-------|--------|-----------|
+| Readiness store | beacon-tenant (tenant-ui) | `packages/tenant-ui/src/stores/platformReadyStore.ts` |
+| Readiness flags in guard | beacon-tenant (tenant-ui) | `packages/tenant-ui/src/components/auth/TenantAuthGuard.tsx` |
+| AuthSync | beacon-tenant (tenant-ui) | `packages/tenant-ui/src/components/auth/AuthSync.tsx` |
+| usePlatformReady hook | beacon-tenant (tenant-ui) | `packages/tenant-ui/src/hooks/usePlatformReady.ts` (or equivalent) |
+| Cache store / service | beacon-tenant (tenant-ui) | platformCacheStore, cacheService (when implemented) |
+
+---
+
+## 3. Readiness flags and computed states
+
+- **Flags:** clerkReady, userReady, authTokenReady, tenantStoreReady, tenantSelected, tenantAuthorized, permissionsReady (optional/lazy).
+- **Computed:** canMakeAuthenticatedRequests (all auth met), canLoadTenantData (auth + tenant met), isFullyReady (including permissions).
+
+---
+
+## 4. Workflow
+
+1. ClerkProvider mounted → Clerk SDK initialized (clerkReady).
+2. User authenticated (userReady); auth token obtained and set on API client (authTokenReady).
+3. Tenant store initialized (tenantStoreReady); tenant selected (tenantSelected).
+4. TenantAuthGuard verifies tenant authorization (tenantAuthorized); optionally bootstraps permissions (permissionsReady).
+5. Components use `usePlatformReady()` and wait for `canLoadTenantData` (or `isFullyReady`) before loading tenant-scoped data.
+
+---
+
+## 5. Rules and guidelines
+
+| Rule | Description |
+|------|-------------|
+| Wait for readiness before loading data | All data-loading components MUST use `usePlatformReady()` and wait for `canLoadTenantData` (and optionally `isFullyReady`) before loading tenant-scoped data. Do not load on `currentTenantId` alone. |
+| Use the hook | Use `usePlatformReady()` from @beacon/tenant-ui; check `isReady`, `canLoadTenantData`, `isFullyReady` as needed. |
+| Handle loading state | Show loading UI while waiting for readiness. |
+| No exceptions | All tenant-scoped data loading must wait for readiness. |
+
+---
+
+## 6. Not yet implemented
+
+- **AuthSync coordination:** Update AuthSync to coordinate readiness state with TenantAuthGuard (plan todo 4).
+- **Global cache:** Platform cache store with TTL and invalidation; cache service with cache-first and stale-while-revalidate; usePermissions and usersService using cache (plan todos 5–8).
+- **API interceptor:** Retry logic for 401 errors when auth becomes ready (plan todo 9).
+- **Data-loading pages:** Update TimeTrackingTab, PortfolioTab, and all other data-loading pages to use usePlatformReady (plan todos 10–11).
+- **PageGuard/ActionGuard:** Update to use cached permissions when cache is implemented (plan todo 12).
+- **App stub:** Include readiness system in setup-new-app app stub template (plan todo 13).
+- **Tests:** Readiness store, cache store, and integration flows (plan todo 15).
+
+---
+
+## 7. References
+
+- Auth flow (TenantAuthGuard, permissions bootstrap): AUTH_AND_AUTHORIZATION.md.
+- Beacon PLATFORM_READINESS.md (usage patterns, migration notes).

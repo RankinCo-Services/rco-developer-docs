@@ -1,0 +1,73 @@
+---
+description: AUTHORITATIVE source for mandatory deploy workflow (ESLint, security compliance, architecture review, deploy script, Monitor Render). Deploy vs deploy-all.
+globs: ["**/deploy*", "**/pre-deploy*", "**/deploy-workflow*", "**/render-deployment*"]
+---
+
+# AUTHORITATIVE – Deploy and Deploy All Workflow
+
+This document is the **source of truth** for the mandatory deploy workflow used across RankinCo projects (Beacon, PSA, and future apps). It is maintained in rco-developer-docs **docs/**; the copy script copies it to project **docs/rco-standards/** and to **.cursor/references/**.
+
+**Derived from:** rco-developer-docs DEPLOY_WORKFLOW.md, Beacon .cursor/rules/render-deployment-workflow.mdc, .cursor/rules/beacon.mdc (deploy command), Beacon scripts/deploy-all.sh, scripts/pre-deploy-check.sh, scripts/validate-migration-sql.sh. Reflects current scripts and Cursor rules.
+
+---
+
+## 1. Description
+
+When you say **"deploy"** or **"deploy all"**, the agent follows this workflow every time. The goal is to run the **entire pipeline** to Render and **fix issues until the relevant services are live**. Security and architecture reviews are **mandatory** for all commits, pushes, and deploys.
+
+---
+
+## 2. Exact workflow (every time)
+
+1. **ESLint** — Zero errors (warnings OK). Run `npm run lint:fix` and `npm run lint:security:fix` in the relevant packages; verify with `npm run lint` and `npm run lint:security`. For deploy-all with submodules, run lint in each submodule that has changes.
+2. **Security compliance** — Run per `.cursor/agents/security-compliance.md` and `.cursor/skills/security-review-before-commit/SKILL.md`. Produce and show the compliance report. If FAIL, fix or document exceptions; rerun until PASS. See [SECURITY_AND_COMPLIANCE_REVIEW.mdc](SECURITY_AND_COMPLIANCE_REVIEW.mdc).
+3. **Architecture review** — For Beacon/Beacon-based apps: `.cursor/references/beacon-architecture-rules.md`. For other projects: project-specific architecture rules. Make any recommended changes for compliance.
+4. **Commit and push** — Run the project's deploy script (e.g. `./deploy "message"` or `./scripts/deploy-all.sh "message"` for cross-repo). The script runs pre-deploy checks unless `--skip-checks`.
+5. **Monitor Render** — Use Render MCP: `list_workspaces`, `select_workspace` (RankinCo Services, `tea-d5qerqf5r7bs738jbqmg`), then `list_deploys`, `list_logs` (build and service), `get_deploy`. Review logs and fix any errors that prevent services from going live. **Repeat (fix → commit/push or redeploy → monitor) until services are live.**
+
+---
+
+## 3. Deploy vs deploy-all
+
+| Scenario | Command | Behavior |
+|----------|---------|----------|
+| **Single-repo deploy** | `./deploy "message"` | Commits and pushes current repo; runs pre-deploy checks (unless `--skip-checks`). Use when only Beacon (or only one repo) has changes. |
+| **Cross-repo deploy (Beacon + submodules)** | `./scripts/deploy-all.sh "message"` | Commits and pushes Beacon, beacon-tenant, and beacon-app-layout (each that has changes) with consistent messages. Runs pre-deploy checks unless `--skip-checks`. Use when a feature touches 1–3 repos. |
+
+**deploy-all.sh options:**
+- `--dry-run` — No commits or pushes.
+- `--skip-checks` / `-s` — Skip pre-deploy checks.
+- `-m "message"` or positional message — Commit message used in all repos (submodule messages prefixed with "Beacon: ").
+
+---
+
+## 4. Pre-deploy checks (Beacon)
+
+When the deploy script runs without `--skip-checks`, it typically runs `./scripts/pre-deploy-check.sh` (or equivalent), which includes:
+
+- **Backend:** Prisma generate (app + platform), TypeScript build/check (no TS errors).
+- **Submodules:** Build beacon-tenant, beacon-app-layout so frontend has their dists.
+- **Migration validation:** Newest migration SQL must be idempotent (e.g. `scripts/validate-migration-sql.sh`). Deploy is blocked if validation fails.
+
+---
+
+## 5. Rules / guidelines
+
+- **Do not consider the workflow complete** until the relevant Render services are live.
+- **Security and architecture reviews** are mandatory for all commits, pushes, deploys, and for any Cursor plans and solution planning. All committed code must comply.
+- **Do not run the deploy command** unless the user explicitly asks; scripts can fail and the user may need to intervene. After code changes, output a "Deploy / next steps" section with the deploy command and commit message.
+
+---
+
+## 6. References (in project after copy)
+
+- **Cursor rules:** `.cursor/rules/deploy-workflow.mdc`, `.cursor/rules/render-deployment-workflow.mdc`.
+- **Render:** RankinCo Services workspace. See [RENDER_DEPLOYMENT_RUNBOOK.md](RENDER_DEPLOYMENT_RUNBOOK.md).
+- **Cross-repo / submodules:** [CROSS_REPO_DEVELOPMENT.md](CROSS_REPO_DEVELOPMENT.md), [SUBMODULE_DEPLOY_RUNBOOK.md](SUBMODULE_DEPLOY_RUNBOOK.md).
+
+---
+
+## 7. Derived from
+
+- **rco-developer-docs:** DEPLOY_WORKFLOW.md.
+- **Beacon:** `.cursor/rules/render-deployment-workflow.mdc`, `.cursor/rules/beacon.mdc`, `scripts/deploy-all.sh`, `scripts/pre-deploy-check.sh`, `scripts/validate-migration-sql.sh`, `deploy` (if present).

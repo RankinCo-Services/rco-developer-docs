@@ -1,0 +1,95 @@
+---
+description: AUTHORITATIVE source of truth for Beacon services layer (tenant-scoped data only via @beacon/tenant-ui services; no direct API calls; no legacy :tenant_id URLs).
+globs: ["**/tenant-ui/**", "**/tenantSettingsService*", "**/usersService*", "**/apiClient*", "**/invitationService*", "**/tenantService*", "**/permissionsService*"]
+---
+
+# AUTHORITATIVE – Services Layer
+
+This document is the **source of truth** for how the Beacon platform accesses tenant-scoped data. It is maintained in rco-developer-docs **docs/**; the copy script copies it to project **docs/rco-standards/** and to **.cursor/references/**.
+
+**Derived from:** Services layer plan, beacon-architecture-rules, and code review of beacon-tenant (tenant-ui services), Beacon frontend (SettingsTab, CompanyInformationTab), and TenantSwitcher.
+
+---
+
+## 1. Description
+
+The **services layer** is the single path for all tenant-scoped data in the Beacon platform. The app and submodules (beacon-app-layout, beacon-tenant-ui components) must **not** call tenant-scoped API endpoints directly (e.g. `/api/tenant-settings`, `/api/users`, `/api/invitations`, `/api/roles`, `/api/permissions`, `/api/tenants`) via raw `fetch`, `api.get()`, or `getApi().get()` with a constructed URL. All such access goes through **services exported from @beacon/tenant-ui**, with **tenant context** set (e.g. `tenantStore.currentTenantId`) and the app’s API client sending the `x-tenant-id` header. The backend exposes **context-based routes** only (tenant from `requireTenant`); no legacy `:tenant_id` in the URL for tenant-scoped data.
+
+---
+
+## 2. Owning submodule / project
+
+| Layer | Owner | Key files |
+|-------|--------|-----------|
+| Service definitions and exports | beacon-tenant (tenant-ui) | `packages/tenant-ui/src/services/` (tenantSettingsService, usersService, invitationService, tenantService, permissionsService, apiClient) |
+| Backend tenant-scoped routes | beacon-tenant (tenant) | `packages/tenant/src/routes/` (tenant-settings, users, invitations, roles, permissions, tenants) |
+| App usage | Beacon frontend | Must use only @beacon/tenant-ui services for tenant-scoped data |
+| Layout usage | beacon-app-layout | Must use only @beacon/tenant-ui services (e.g. TenantSwitcher uses tenantSettingsService) |
+
+---
+
+## 3. Architecture intent
+
+- **Services layer:** All tenant-scoped data is accessed via services exported from `@beacon/tenant-ui`. The app does not construct URLs or call tenant-scoped endpoints directly.
+- **No legacy fallback:** One path only: configured API + tenant context + service layer. No legacy URL pattern (e.g. `/api/tenant-settings/:tenant_id`) as primary or fallback.
+- **Submodule-owned access:** Components in beacon-tenant-ui or beacon-app-layout that need tenant data use the appropriate service from `@beacon/tenant-ui` (e.g. `tenantSettingsService.getTenantSettings()`), not raw API calls.
+- **Platform-level vs tenant-scoped:** Endpoints under `/api/platform-admin/*` or `/api/tenants` (list for current user) are platform-level. Direct `api.get()` to these from platform-admin UI or tenant selection is acceptable. Tenant-scoped endpoints (per-tenant settings, users, invitations, roles, permissions) must be accessed only via the service layer with tenant context set.
+
+---
+
+## 4. Services exported from @beacon/tenant-ui
+
+| Service | Purpose |
+|---------|---------|
+| tenantSettingsService | getTenantSettings(), updateTenantSettings(); context-based GET/PUT /api/tenant-settings |
+| usersService | getUsers(), getRoles(), updateUserRole(); tenant-scoped users and roles |
+| invitationService | Tenant invitations |
+| tenantService | getTenants(); tenant list for current user |
+| permissionsService | getPermissions(); tenant-scoped permissions with granted status |
+| BeaconApiClient | checkPermission(namespace, tenantId); fail-closed permission check |
+
+All require tenant context (e.g. currentTenantId) to be set before calling; the app’s API client must send `x-tenant-id` for tenant-scoped requests.
+
+---
+
+## 5. Workflows
+
+- **App or layout needs tenant data:** Import the service from `@beacon/tenant-ui`, ensure tenant context is set (e.g. after TenantAuthGuard), then call the service method. Do not build URLs or call `api.get(\`/api/tenant-settings/${id}\`)`.
+- **Backend:** Tenant-scoped routes use `requireTenant` (tenant from `x-tenant-id` or body/query as documented); no `:tenant_id` in path for tenant-scoped resources.
+- **Permission checks:** Use `BeaconApiClient.checkPermission` or `permissionsService` / cached permissions; do not call `/api/permissions` or `/api/permissions/check` directly.
+
+---
+
+## 6. Rules and guidelines
+
+| Rule | Description |
+|------|-------------|
+| No direct tenant-scoped API calls | Frontend and layout must not call `/api/tenant-settings`, `/api/users`, `/api/invitations`, `/api/roles`, `/api/permissions`, or tenant-scoped `/api/tenants` via raw fetch or api.get() with a constructed URL. Use only @beacon/tenant-ui services. |
+| Tenant context before calls | Any code that calls tenant-ui services must run only when tenant context is set (e.g. tenantStore.currentTenantId). Do not call before TenantAuthGuard has established the current tenant. |
+| x-tenant-id for tenant-scoped requests | The app’s API client must send the `x-tenant-id` header for tenant-scoped requests. Platform-level endpoints must not have tenant_id forced by the same interceptor. |
+| No legacy :tenant_id in URL | Do not introduce or rely on paths that include `:tenant_id` in the URL for tenant-scoped data. Backend exposes only context-based routes. |
+| Fail-closed permission checks | PageGuard and permission checks must use BeaconApiClient.checkPermission, permissionsService, or cached permissions—not direct fetch to /api/permissions. |
+
+---
+
+## 7. Current state (from code review)
+
+- **App:** SettingsTab and CompanyInformationTab use `tenantSettingsService.getTenantSettings()` and `tenantSettingsService.updateTenantSettings()`.
+- **TenantSwitcher:** Uses `tenantSettingsService.getTenantSettings()` for tenant settings. Uses direct `api.get('/api/platform-admin/tenants')` only when in platform-admin context (platform-level endpoint).
+- **Users, permissions, invitations, roles:** Consumed via usersService, permissionsService, invitationService, tenantService from @beacon/tenant-ui where tenant-scoped data is needed.
+- **Platform-admin UI:** Direct calls to `/api/platform-admin/tenants` and similar are acceptable; these are platform-level endpoints, not tenant-scoped.
+
+---
+
+## 8. Not yet implemented
+
+- **Legacy routes:** If beacon-tenant still exposes GET/PUT `/:tenant_id` for tenant-settings (or any tenant-scoped resource), remove them once all callers use the service layer and context-based routes only.
+- **Consistency check:** Ensure no remaining app or layout code constructs tenant-scoped URLs or calls tenant-scoped endpoints directly; add to architecture review checklist if not already present.
+
+---
+
+## 9. References
+
+- Architecture (3-app model, dependency direction): ARCHITECTURE_3APP_MODEL.md, ARCHITECTURE_ANALYSIS.md.
+- Beacon architecture rules (services layer): `.cursor/references/beacon-architecture-rules.md`.
+- RBAC (permissions via service layer): RBAC_AND_PERMISSIONS.mdc.

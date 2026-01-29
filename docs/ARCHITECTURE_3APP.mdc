@@ -1,0 +1,97 @@
+---
+description: AUTHORITATIVE umbrella for Beacon 3-app architecture (beacon-tenant, beacon-app-layout, app). Links to Services Layer, Platform/App DBs, Platform Readiness, Audit, Auth, RBAC.
+globs: ["**/beacon-tenant/**", "**/beacon-app-layout/**", "**/backend/src/index.ts", "**/architecture*.mdc"]
+---
+
+# AUTHORITATIVE – 3-App Architecture (Umbrella)
+
+This document is the **source of truth** for the Beacon 3-app architecture. It is maintained in rco-developer-docs **docs/**; the copy script copies it to project **docs/rco-standards/** and to **.cursor/references/**.
+
+**Derived from:** rco-developer-docs ARCHITECTURE_ANALYSIS.md, ARCHITECTURE_3APP_MODEL.md, Beacon .cursor/rules/architecture-analysis.mdc, Beacon backend index.ts (platformPrisma, appPrisma, tenant routers). Reflects current code.
+
+---
+
+## 1. Description
+
+The Beacon platform is built as **three packages**: (1) **beacon-tenant** (framework/infrastructure), (2) **beacon-app-layout** (UI/layout), (3) **the app** (e.g. Beacon frontend – business logic). Dependency direction is **App → beacon-app-layout → beacon-tenant**. The host backend instantiates both Platform and App Prisma clients and passes **platformPrisma** into beacon-tenant; beacon-tenant does not create its own DB client.
+
+---
+
+## 2. Diagram
+
+```mermaid
+flowchart LR
+  subgraph App["App (e.g. Beacon frontend)"]
+    PSA[PSA pages & services]
+  end
+  subgraph Layout["beacon-app-layout"]
+    AL[AppLayout, Sidebar, Breadcrumbs]
+    PG[PageGuard, ActionGuard]
+  end
+  subgraph Tenant["beacon-tenant"]
+    TU[tenant-ui: Auth, TenantSwitcher, services]
+    TB[tenant: routes, middleware, audit]
+  end
+  App --> Layout
+  Layout --> Tenant
+```
+
+---
+
+## 3. Owning submodule / project
+
+| Package | Owner repo | Role |
+|--------|------------|------|
+| **beacon-tenant** | beacon-tenant (submodule) | Framework: multi-tenancy, auth, user management, invitations, RBAC, platform admin, audit. Backend (`@beacon/tenant`) + frontend (`@beacon/tenant-ui`). |
+| **beacon-app-layout** | beacon-app-layout (submodule) | UI/layout: layout components, navigation, RBAC UI (PageGuard, ActionGuard). No business logic; no direct tenant API calls. |
+| **App** | Beacon (or other app repo) | Business logic and domain (e.g. PSA: projects, time, invoicing). Consumes framework; does not duplicate tenant/auth infrastructure. |
+
+---
+
+## 4. Responsibilities (current state)
+
+| Concern | Lives in | Notes |
+|---------|----------|--------|
+| Tenant-scoped backend routes (users, roles, permissions, tenant-settings, platform-admin) | beacon-tenant | Host mounts routers from @beacon/tenant; passes platformPrisma |
+| Platform DB (Tenant, User, Role, Permission, TenantSettings, Audit) | Platform schema; platformPrisma | See [PLATFORM_AND_APP_DATABASES.mdc](PLATFORM_AND_APP_DATABASES.mdc) |
+| App DB (Client, Project, TimeEntry, Invoice, etc.) | App schema; appPrisma | Same host backend; dual DB |
+| Auth (Clerk JWT, requireTenant, requirePermission) | beacon-tenant | See [AUTH_AND_AUTHORIZATION.mdc](AUTH_AND_AUTHORIZATION.mdc) |
+| Services layer (no raw tenant API calls from app/layout) | @beacon/tenant-ui | See [SERVICES_LAYER.mdc](SERVICES_LAYER.mdc) |
+| Platform readiness & optional global cache | beacon-tenant-ui | See [PLATFORM_READINESS_AND_CACHE.mdc](PLATFORM_READINESS_AND_CACHE.mdc) |
+| Audit (events, worker, routes) | beacon-tenant | See [AUDIT_SYSTEM.mdc](AUDIT_SYSTEM.mdc) |
+| RBAC (catalog, requirePermission, permissions API) | beacon-tenant + platform schema | See [RBAC_AND_PERMISSIONS.mdc](RBAC_AND_PERMISSIONS.mdc) |
+
+---
+
+## 5. Workflows / relationships
+
+- **Backend startup:** Host creates `platformPrisma` and `appPrisma`, runs platform bootstrap, sets `app.set('platformPrisma', platformPrisma)` and `app.set('appPrisma', appPrisma)`, mounts tenant routers (tenant-settings, platform-admin, permissions, roles, users, seeding, audit). App-domain routes (clients, projects, invitations, etc.) use app or both clients as needed.
+- **Frontend:** App uses `@beacon/tenant-ui` (TenantAuthGuard, TenantSwitcher, services) and `@beacon/app-layout` (AppLayout, navigation, PageGuard/ActionGuard). All tenant-scoped data goes through tenant-ui services; no direct fetch to tenant APIs from app or layout.
+
+---
+
+## 6. Rules / guidelines
+
+- **Dependency direction:** App → beacon-app-layout → beacon-tenant. No reverse dependencies.
+- **Tenant-scoped code** (users, invitations, auth pages, usersService) lives in **beacon-tenant**, not the app.
+- **Tenant-scoped backend routes** live in **beacon-tenant** packages, not `backend/src/routes/`.
+- **App** focuses solely on business logic; framework provides reusable infrastructure.
+- **Enforcement:** See `.cursor/references/beacon-architecture-rules.md` (in this repo; copied into projects).
+
+---
+
+## 7. Related authoritative docs
+
+- [SERVICES_LAYER.mdc](SERVICES_LAYER.mdc) – No direct tenant API calls; use @beacon/tenant-ui services.
+- [PLATFORM_AND_APP_DATABASES.mdc](PLATFORM_AND_APP_DATABASES.mdc) – Dual DB model, schema ownership.
+- [PLATFORM_READINESS_AND_CACHE.mdc](PLATFORM_READINESS_AND_CACHE.mdc) – Readiness store, optional global cache.
+- [AUDIT_SYSTEM.mdc](AUDIT_SYSTEM.mdc) – Audit events, worker, middleware.
+- [AUTH_AND_AUTHORIZATION.mdc](AUTH_AND_AUTHORIZATION.mdc) – Clerk, JWT, requireTenant, requirePermission.
+- [RBAC_AND_PERMISSIONS.mdc](RBAC_AND_PERMISSIONS.mdc) – Permissions catalog, roles, requirePermission.
+
+---
+
+## 8. Not yet implemented
+
+- **Multi-app switcher:** Single UI to switch between apps (e.g. PSA, future apps) for a tenant; requires TenantAppSubscription and app-scoped routing. See [MULTI_APP_SUPPORT.mdc](MULTI_APP_SUPPORT.mdc).
+- **Physical DB split:** Currently both platform and app schemas can be applied to one database (same DATABASE_URL or PLATFORM_DATABASE_URL). A future option is separate physical databases and migration folders (platform vs app); see PLATFORM_AND_APP_DATABASES "Not yet implemented."

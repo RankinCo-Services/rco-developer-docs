@@ -1,0 +1,157 @@
+---
+description: AUTHORITATIVE source of truth for Beacon RBAC and permissions (namespace, platform vs app, catalog, requirePermission, services layer). Full doc for Cursor.
+globs: ["**/permissions/**", "**/permission*.ts", "**/roles.ts", "**/requirePermission*", "**/catalog.ts", "**/permissionsService*", "**/apiClient.ts"]
+---
+
+# AUTHORITATIVE – RBAC and Permissions Model
+
+This document is the **source of truth** for the Beacon platform RBAC (role-based access control) and permissions model. It is maintained in rco-developer-docs **docs/**; the copy script copies it to project **docs/rco-standards/** and to **.cursor/references/** for easy viewing in Cursor.
+
+**Derived from:** Analysis of beacon-tenant (permissions catalog, routes, middleware), Beacon backend (platform schema, permissionSeeder), and beacon-tenant-ui (permissionsService, apiClient). Not copied from legacy docs; reflects current code as of the last review.
+
+---
+
+## 1. Description
+
+The Beacon platform uses a **hierarchical, namespace-based RBAC** system. Permissions are identified by a unique **namespace** string (e.g. `platform:platform-admin:tenants:view`, `psa:financial:invoices:view`). Users receive permissions through **roles** (Role → RolePermission → Permission) and optionally through **user-level overrides** (UserPermission). Platform-scoped permissions (`app_id` null) and app-scoped permissions (e.g. PSA, `app_id` set) both live in the **Platform DB**; the backend uses **platformPrisma** for all permission checks. The frontend never calls permission APIs directly; it uses **@beacon/tenant-ui** services (`permissionsService.getPermissions()`, `beaconApiClient.checkPermission()`).
+
+---
+
+## 2. Owning submodule / project
+
+| Layer | Owner | Key files |
+|-------|--------|-----------|
+| Permission catalog (definitions) | beacon-tenant | `packages/tenant/src/permissions/catalog.ts` |
+| Backend routes (list, check) | beacon-tenant | `packages/tenant/src/routes/permissions.ts`, `routes/roles.ts` |
+| Backend middleware (requirePermission, checkUserPermission) | beacon-tenant | `packages/tenant/src/middleware/requirePermission.ts` |
+| Platform DB schema (Permission, Role, RolePermission, UserPermission, UserRole) | Beacon backend | `backend/prisma/platform/schema.prisma` |
+| Seeding / bootstrap | Beacon backend + beacon-tenant | `backend/src/utils/permissionSeeder.ts`, beacon-tenant `bootstrap/platformBootstrap.ts` |
+| Frontend (get permissions, check permission) | beacon-tenant (tenant-ui) | `packages/tenant-ui/src/services/permissionsService.ts`, `services/apiClient.ts` |
+
+The host app (e.g. Beacon) mounts beacon-tenant routes at `/api/permissions` and `/api/roles`, and provides `platformPrisma` to all beacon-tenant routers and middleware.
+
+---
+
+## 3. Data model (Platform DB)
+
+All RBAC tables live in the **Platform DB** (`PLATFORM_DATABASE_URL`). App-domain data does not reference these tables.
+
+```mermaid
+erDiagram
+  App ||--o{ Permission : "app_id"
+  App ||--o{ Role : "app_id"
+  Tenant ||--o{ TenantAppSubscription : tenant_id
+  App ||--o{ TenantAppSubscription : app_id
+  Tenant ||--o{ Role : tenant_id
+  Role ||--o{ RolePermission : role_id
+  Permission ||--o{ RolePermission : permission_id
+  User ||--o{ UserPermission : user_id
+  Permission ||--o{ UserPermission : permission_id
+  User ||--o{ UserRole : user_id
+  Role ||--o{ UserRole : role_id
+  Tenant ||--o{ UserRole : tenant_id
+  Permission {
+    string namespace UK
+    string app_id "null = platform"
+    string module
+    string page
+    string tab
+    string section
+    string action
+  }
+  Role {
+    string tenant_id
+    string app_id "null = platform"
+    string name
+    boolean is_platform
+  }
+  UserRole {
+    string user_id
+    string tenant_id
+    string role_id
+  }
+  UserPermission {
+    string user_id
+    string tenant_id
+    string permission_id
+  }
+```
+
+- **Permission**: One row per permission. `app_id` null = platform permission; otherwise scoped to an App (e.g. PSA). `namespace` is unique (e.g. `platform:platform-admin:tenants:view`, `psa:financial:invoices:view`).
+- **Role**: Scoped to a tenant; optional `app_id` (null for platform roles). Unique per tenant + app + name (e.g. "Tenant Admin", "Platform Admin").
+- **UserRole**: User has a role in a tenant (user_id, tenant_id, role_id). Used for role-based permission resolution.
+- **UserPermission**: Direct user–permission override in a tenant (grants only in current code; no explicit deny flag).
+- **TenantAppSubscription**: Links tenant to app; used to filter which permissions are visible (GET /api/permissions returns permissions for subscribed apps + platform). Not yet used in **requirePermission** to block access (see Not yet implemented).
+
+---
+
+## 4. Namespace format and catalog
+
+- **Format**: `{scope}:{module}:{page}:{tab?}:{section?}:{action?}`  
+  - Platform: `platform:platform-admin:tenants:view`, `platform:platform-admin:audit:view`.  
+  - App (e.g. PSA): `psa:administration:roles-permissions:view`, `psa:financial:invoices:actions:create`.
+- **Catalog**: beacon-tenant `packages/tenant/src/permissions/catalog.ts` defines:
+  - `PermissionDefinition`: namespace, module, page?, tab?, section?, action?, description, appNamespace?.
+  - `PLATFORM_PERMISSIONS`, `PSA_PERMISSIONS`, `PERMISSION_CATALOG`, `getPermissionsForApp(appNamespace: string | null)`.
+- Seeding (Beacon backend `permissionSeeder.ts`, beacon-tenant `platformBootstrap.ts`) upserts permissions from the catalog into the Platform DB (by namespace), with `app_id` set for app-scoped permissions (e.g. PSA app id for `psa:*`).
+
+---
+
+## 5. Workflows and relationships
+
+### 5.1 Bootstrap and readiness (frontend)
+
+1. User is signed in and tenant is selected and authorized (TenantAuthGuard).
+2. TenantAuthGuard calls `permissionsService.getPermissions()` (GET /api/permissions with tenant context).
+3. Backend returns permissions for tenant's **subscribed apps** plus **platform** permissions; each permission includes a `granted` boolean for the current user.
+4. On success, tenant-ui sets `setPermissionsReady(true)` so platform readiness can reach `isFullyReady`.
+5. Pages and guards use cached permissions or `beaconApiClient.checkPermission(namespace, tenantId)` for ad-hoc checks (fail-closed: errors → false).
+
+### 5.2 Backend protection (requirePermission)
+
+1. Route is mounted with `requireTenant` then `requirePermission('namespace')` (e.g. `requirePermission('psa:financial:invoices:view')`).
+2. Middleware reads `platformPrisma` from `req.app.get('platformPrisma')`, `x-user-id` from headers, `req.tenantId` from requireTenant.
+3. `checkUserPermission(prisma, userId, tenantId, namespace)`:
+   - Resolves Permission by namespace.
+   - Checks UserPermission (user+tenant+permission) – if present, grants.
+   - Resolves target tenant: platform permission → platform tenant id; app permission → req.tenantId.
+   - Loads UserRole for user+tenant; checks if any role has RolePermission for that permission.
+   - If `allowPlatformAdmin` and permission is platform-scoped, grants for Platform Admin role in platform tenant.
+4. If not granted, responds 403. Otherwise next().
+
+### 5.3 Frontend checks (services layer only)
+
+- **List permissions**: Use `permissionsService.getPermissions()` (no direct GET /api/permissions).
+- **Check one permission**: Use `beaconApiClient.checkPermission(namespace, tenantId)` or equivalent from @beacon/tenant-ui (no direct GET /api/permissions/check). Fail-closed: on error, treat as denied.
+
+---
+
+## 6. Rules and guidelines
+
+| Rule | Description |
+|------|-------------|
+| Platform DB only | All Permission, Role, RolePermission, UserPermission, UserRole data lives in Platform DB; use platformPrisma only. |
+| Namespace is unique | One Permission row per namespace; catalog and seed use namespace as the stable key. |
+| Platform vs app | Platform permissions have `app_id` null; app permissions have `app_id` set to the App row (e.g. PSA). Roles can be platform (e.g. Platform Admin) or app-scoped (e.g. Tenant Admin for PSA). |
+| Adding permissions | Add the definition to the catalog (`catalog.ts`) for the appropriate app (or platform); run seed/bootstrap so the Permission row exists. Use requirePermission('namespace') on backend; use checkPermission / permissionsService on frontend. |
+| Fail-closed | Permission checks must deny on error or missing data. Frontend checkPermission returns false on any error; backend checkUserPermission returns false when permission not found or no role/user override grants it. |
+| Services layer | Frontend and layout must not call `/api/permissions` or `/api/permissions/check` directly; use only @beacon/tenant-ui permissionsService and beaconApiClient.checkPermission. |
+
+---
+
+## 7. Not yet implemented
+
+The following are from the multi-app or RBAC plans but are **not** present in the current codebase; they should be implemented or explicitly deferred:
+
+- **Subscription check in requirePermission**: The multi-app plan specifies that requirePermission should verify the tenant has an active **TenantAppSubscription** for the permission's app before allowing app-scoped permissions. Currently, GET /api/permissions filters by subscribed apps for listing, but **checkUserPermission** does not reject app-scoped permission checks when the tenant is not subscribed to that app. Adding this check would align backend enforcement with subscription state.
+- **Explicit deny in UserPermission**: The code comments note that UserPermission currently only grants; an allow/deny flag for explicit deny is not implemented.
+- **Hierarchical permission inheritance**: If any design calls for "parent" permissions implying "child" permissions (e.g. `psa:financial:invoices:view` implying `psa:financial:invoices:actions:create`), that logic is not in the current checkUserPermission; each namespace is checked independently.
+
+---
+
+## 8. References
+
+- Auth flow (permissions bootstrap, requireTenant, requirePermission): AUTH_AND_AUTHORIZATION.md.
+- Architecture (platformPrisma, services layer): ARCHITECTURE_3APP_MODEL.md, ARCHITECTURE_ANALYSIS.md.
+- Platform DB schema: Beacon `backend/prisma/platform/schema.prisma`.
+- Beacon architecture rules (permission checks via service layer, fail-closed): `.cursor/references/beacon-architecture-rules.md`.
