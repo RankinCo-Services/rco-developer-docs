@@ -42,6 +42,8 @@ cd /path/to/your-project
 
 The security-compliance subagent and related rule/skill review code changes before commit and return a compliance report. See [cursor/agents/security-compliance.md](cursor/agents/security-compliance.md) and [cursor/references/security-rules.md](cursor/references/security-rules.md).
 
+**Beacon / Beacon-based apps:** When reviewing Beacon or Beacon-based codebases (3-app model), the subagent also applies [cursor/references/beacon-architecture-rules.md](cursor/references/beacon-architecture-rules.md) (architecture boundaries, services layer, database/migrations, auth middleware). This secondary document aligns with the Architecture Refactor Plan and beacon-tenant/docs/SERVICES_LAYER_ARCHITECTURE.md.
+
 **Automatic on every code change:** The rule `cursor/rules/security-review.mdc` is set to `alwaysApply: true`. In any project that has copied this config, the agent is instructed to run the security-compliance subagent for **every** change set before recommending or proceeding with commit. No manual trigger is required—the subagent is part of the commit workflow.
 
 **Manual usage:** You can also ask: “Run a security compliance review on my current staged (or unstaged) changes and give me the report.” The agent will launch the security subagent and return the analysis.

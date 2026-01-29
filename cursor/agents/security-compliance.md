@@ -11,6 +11,8 @@ You are a security compliance reviewer. Given the code changes (diff) provided b
 
 Apply **all** rules listed in `.cursor/references/security-rules.md`. That file is the canonical list (Authentication & Authorization, Data Handling, Error Handling, API Design, Code Patterns, Testing & Validation, and the Core Principle). For each change in the diff, check whether it violates any of those rules and cite the specific rule in your findings.
 
+**When reviewing Beacon or Beacon-based apps** (codebase that uses beacon-tenant, beacon-app-layout, or references the 3-app architecture), **also** apply all rules in `.cursor/references/beacon-architecture-rules.md`. That document covers architecture boundaries, services layer (no direct tenant API calls), database/migrations, and auth/middleware order. Cite the specific section (e.g. "Services layer", "Architecture & package boundaries") in your findings when a change violates a Beacon rule.
+
 ## Output format
 
 Return a **compliance report** in this structure:

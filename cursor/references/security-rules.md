@@ -46,6 +46,17 @@ Canonical list of security rules for multi-tenant web application development. T
 
 ---
 
+## Beacon / Beacon-based apps (secondary rules)
+
+When reviewing **Beacon** or **Beacon-based** codebases (3-app model: beacon-tenant, beacon-app-layout, app), the security-compliance subagent must **also** apply the rules in `.cursor/references/beacon-architecture-rules.md`. That document covers:
+
+- **Architecture & package boundaries** – Where routes live (beacon-tenant vs app backend), dependency direction, correct Prisma client (platformPrisma vs appPrisma).
+- **Services layer** – No direct API calls to tenant-scoped endpoints; use only @beacon/tenant-ui services; no legacy `:tenant_id` routes; tenant context before service calls.
+- **Database and migrations** – App DB tenant_id only, no FK to Platform DB; idempotent migration SQL.
+- **Auth and middleware order** – verifyClerkJwt then requireTenant; req.tenantId for scoping; requirePlatformAdmin for platform-admin; do not remove auth to fix bugs.
+
+---
+
 ## Core Principle
 
 When in doubt between functionality and security, choose security. A feature that doesn't work is a bug; a feature that leaks data across tenants is a catastrophic failure.
