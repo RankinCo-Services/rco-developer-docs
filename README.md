@@ -40,9 +40,11 @@ cd /path/to/your-project
 
 ## Security review agent
 
-The security-compliance subagent and related rule/skill help review code changes before commit and return a compliance report. See [cursor/agents/security-compliance.md](cursor/agents/security-compliance.md) and [cursor/references/security-rules.md](cursor/references/security-rules.md).
+The security-compliance subagent and related rule/skill review code changes before commit and return a compliance report. See [cursor/agents/security-compliance.md](cursor/agents/security-compliance.md) and [cursor/references/security-rules.md](cursor/references/security-rules.md).
 
-**Usage:** In Cursor, ask the agent: “Run a security compliance review on my current staged (or unstaged) changes and give me the report.” The agent will launch the security subagent and return the analysis.
+**Automatic on every code change:** The rule `cursor/rules/security-review.mdc` is set to `alwaysApply: true`. In any project that has copied this config, the agent is instructed to run the security-compliance subagent for **every** change set before recommending or proceeding with commit. No manual trigger is required—the subagent is part of the commit workflow.
+
+**Manual usage:** You can also ask: “Run a security compliance review on my current staged (or unstaged) changes and give me the report.” The agent will launch the security subagent and return the analysis.
 
 ## Adding or updating standards
 
