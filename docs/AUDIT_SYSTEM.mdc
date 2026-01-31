@@ -48,8 +48,38 @@ The audit system provides immutable audit trails for create, update, and delete 
 - **AuditService:** getAuditService(prisma); logSecurityEvent (sync, fail-safe); logBusinessEvent, logTechnicalEvent, logMetricsEvent (async via queue). Queue writes to AuditQueue; worker processes and calls logAuditEvent.
 - **logAuditEvent:** Direct insert into AuditEvent (used by security path and by worker).
 - **AuditWorker:** Processes AuditQueue, calls logAuditEvent; started by backend with platformPrisma.
-- **auditMiddleware:** Captures request metadata; can log CUD operations (integration with routes).
-- **auditHelpers:** auditCreate, auditUpdate, auditDelete, auditSecurity (re-exported for app use).
+- **auditMiddleware:** Captures request metadata; can log CUD operations (integration with routes). Module never "unknown" — falls back to `"api"`. Reads `req.audit.module` (explicit from routes) and `req.auditUserDisplay` (user_name, user_email) for display.
+- **auditHelpers:** auditCreate, auditUpdate, auditDelete, auditSecurity (re-exported); **auditCreateWithSkip, auditUpdateWithSkip, auditDeleteWithSkip** for route handlers that log an explicit event (set `req.audit.skipAudit = true` to avoid duplicate middleware event).
+- **Person display:** Backend personDisplayMiddleware caches Person display_name/email by (user_id, tenant_id); populates `req.auditUserDisplay`. Call **invalidatePersonDisplayCache(userId, tenantId)** when Person is updated/deleted. Frontend can pass **userDisplayName** and **userEmail** via setAuthToken options so API requests send x-user-name and x-user-email as fallback.
+
+---
+
+## 4.1. Implemented events
+
+Audit events come from three sources. Stored fields include **user_id** and **user_name** (person display name) for human context; **description** should be human-readable where possible; **meta** holds system info (method, path, request/response, before/after).
+
+| Source | Description | Module / entity_type | Notes |
+|--------|-------------|---------------------|--------|
+| **Middleware (CUD requests)** | `METHOD path` (e.g. `POST /api/work-items`) or improved when path is empty | From path: `api/<segment>` → module; entity from path segment | Unknown POST (e.g. `POST /`) improved with body keys or "POST (no path)" so events are traceable. |
+| **Explicit app routes** | Human-readable (e.g. "Created work item WBS-001 (Phase 1)", "Updated project CRM Implementation (PRJ-001)") | Set per route (work_items, projects, timesheets, etc.) | auditCreate, auditUpdate, auditDelete called after CUD with description and entity_type. |
+| **Platform / tenant** | Security and platform admin actions | security, tenants, users, etc. | logSecurityEvent or platform routes. |
+
+**App-domain examples (explicit events):**
+
+- **work_items:** Created/Updated/Deleted work item with key and name; meta includes key, name, project_id; update includes before/after.
+- **projects:** Updated project with code and name (e.g. "Updated project CRM Implementation (PRJ-001)").
+- **timesheets / time_entries:** Create, update, delete with human-readable description and entity id.
+- **people, contacts, opportunities, proposals, sales:** Create, update, delete with descriptive text and entity_type (person, contact, opportunity, proposal, sale).
+- **workflows:** Step create/update/delete; workflow transitions (e.g. allowed transitions, submit).
+
+**Improving usefulness:**
+
+- Store both **user_id** and **user_name** (person display name) so logs show who acted without lookups.
+- Prefer **human-readable description** for explicit events; **meta.request.method/path** (and meta.requestBody) provide system-meaningful detail.
+- For middleware-only events (no explicit audit call), description is method + path; when path is missing or "/", use "POST (no path)" and derive module from body when possible to reduce "unknown" entries.
+- **Detail panel:** When an audit event is selected in the UI, the platform’s standard detail panel shows all associated fields (including meta, correlation_id, request_id, before/after) in a readable layout.
+- **Activity tab:** Detail panels use a subset of audit events (CRUD for that entity) to populate the Activity tab. The list API supports **entity_type** and **entity_id** filters. Display format is human-readable (e.g. "01/12/2026 Matt Rankin created Lead", "01/12/2026 Matt Rankin updated Lead (Phone number)"). Update detail can come from meta.changedFields or from the event description.
+- **Cache invalidation API:** Backend exposes **GET /api/cache-events** (Server-Sent Events) with auth (Bearer or `?token=`). Frontend webhookHandler subscribes via EventSource (or WebSocket when enabled) to receive cache invalidation events and refresh permissions/roles/users/app caches. Person cache invalidation is triggered on Person CUD so audit display stays correct.
 
 ---
 
