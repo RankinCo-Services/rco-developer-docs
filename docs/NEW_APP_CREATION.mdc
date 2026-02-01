@@ -1,5 +1,5 @@
 ---
-description: AUTHORITATIVE source for creating a new app in RankinCo Services: scaffold, Render, app stub, add to existing platform.
+description: AUTHORITATIVE source for creating a new app in RankinCo Services: scaffold, Render, app stub, add to existing platform, and registering the app with the platform (manifest, multi-origin).
 globs: ["**/create-new-app*", "**/minimal-beacon*", "**/render-create-project*", "**/app-stub*"]
 ---
 
@@ -7,13 +7,17 @@ globs: ["**/create-new-app*", "**/minimal-beacon*", "**/render-create-project*",
 
 This document is the **source of truth** for creating a new app in RankinCo Services and for the app-stub pattern. It is maintained in rco-developer-docs **docs/**; the copy script copies it to project **docs/rco-standards/** and to **.cursor/references/**.
 
-**Derived from:** setup-new-app docs (CREATE-APP-RUNBOOK.md, ADDING_APP_TO_EXISTING_PLATFORM.md, BEACON_PLATFORM_DEPLOYMENT_GUIDE.md), scripts (create-new-app.sh, minimal-beacon-pattern.sh, render-create-project-and-group.sh), Beacon docs/APP_STUB_IMPLEMENTATION_SUMMARY.md. Reflects current scripts and runbooks.
+**Derived from:** setup-new-app docs (CREATE-APP-RUNBOOK.md, ADDING_APP_TO_EXISTING_PLATFORM.md, BEACON_PLATFORM_DEPLOYMENT_GUIDE.md), scripts (create-new-app.sh, minimal-beacon-pattern.sh, render-create-project-and-group.sh), Beacon docs/APP_STUB_IMPLEMENTATION_SUMMARY.md, and design discussion (multi-origin, app lifecycle, manifest, platform admin draft testing). See [MULTI_APP_SUPPORT.mdc](MULTI_APP_SUPPORT.mdc) for platform multi-app design.
+
+**Junior developer step-by-step:** For a walkthrough suitable for a junior developer (standalone and in-platform), see [CREATE_NEW_BEACON_APP.md](CREATE_NEW_BEACON_APP.md).
 
 ---
 
 ## 1. Description
 
-**New-app creation** has two phases: (1) **PHASE 1** — Create GitHub repo and scaffold (Beacon pattern: Express+Prisma, Vite+React+TS, beacon-tenant, beacon-app-layout, optional beacon-app-stub); (2) **PHASE 2** — Create Render project and services (-db, -api, -frontend), set env (DATABASE_URL, VITE_API_URL, Clerk), SPA rewrite. **One-command:** `create-new-app.sh <ORG> <APP_NAME> <OWNER_ID>` runs PHASE 1 then PHASE 2 with `--no-prompt` when secrets are in `--secrets-file` or env. **App stub** provides standardized app structure, onboarding workflow, and seeding integration for new apps.
+**New-app creation** has two main workflows: (1) **setup-new-app** — PHASE 1 (minimal-beacon-pattern.sh: scaffold with dual DB, beacon-tenant, beacon-app-layout) and PHASE 2 (render-create-project-and-group.sh: -db, -api, -frontend). **One-command:** `create-new-app.sh <ORG> <APP_NAME> <OWNER_ID>`. (2) **beacon-app-min** — Use GitHub "Use this template" from **beacon-app-min**, then run `render-bootstrap-multi-app.sh` to create -db, -api, and -frontend (or **--in-platform** to create only -db and -api; app UI runs as a route inside Beacon frontend). **In-platform (beacon-app-min):** Use `--in-platform`; then add app module + route in Beacon repo, set VITE_<APP_NAMESPACE>_API_URL on Beacon frontend and FRONTEND_URL on app API (Beacon frontend URL for CORS). See beacon-app-min docs/MULTI_APP_RUNBOOK.md. **App stub** (setup-new-app) provides standardized app structure, onboarding, and seeding for the other workflow.
+
+**One platform, N app deploys:** The **platform (beacon-tenant)** is deployed **once**. Each new app requires **new Render services for that app only** (api, frontend, app db) — not a new platform. Deploying "the entire platform with a new blank app" has led to failed attempts; the evolved model is **multi-app**: one platform, many app deployments. A **new blank app-stub** should correctly implement the **3-app model** and be **set up from the start to be published**: it assumes the platform already exists, consumes beacon-tenant and beacon-app-layout, uses manifest/platform URL for identity, and has a deploy story that creates **only app** Render services (api, frontend, app db), not platform services. The new app-stub is a **new repo on GitHub under the RankinCo-Services org** (e.g. `beacon-app-stub`); it includes **scripts or a runbook** to **automatically create and configure the Render services** it needs (api, frontend, db) so the app **bootstraps itself on first build** — no manual Render setup. **Who creates the stub:** The **platform team** (not developers) creates and maintains the beacon-app-stub repo. Developers **create a new app from the stub** (e.g. GitHub "Use this template" to create a new repo, or a script that creates a new repo from the template), then **clone and work only in that new app repo** and push there. They never push to beacon-app-stub; only platform team has write access so developers cannot overwrite or modify the canonical stub. See [MULTI_APP_SUPPORT.mdc](MULTI_APP_SUPPORT.mdc) and the multi-app-platform plan.
 
 ---
 
@@ -43,7 +47,9 @@ This document is the **source of truth** for creating a new app in RankinCo Serv
 ## 4. Order (do not reorder)
 
 1. **PHASE 1** — Create GitHub repo and scaffold. Run from **setup-new-app**.
-2. **PHASE 2** — Run **render-create-project-and-group.sh** with `--create-services` (and `--variant=beacon-pattern` or `--variant=smoke`). Creates Postgres, web, static; groups; sets env and SPA rewrite. DATABASE_URL from Render connection-info when possible, else prompt (or `--no-prompt` + secrets).
+2. **PHASE 2 (setup-new-app)** — Run **render-create-project-and-group.sh** with `--create-services` (and `--variant=beacon-pattern` or `--variant=smoke`). Creates Postgres, web, static; groups; sets env and SPA rewrite. DATABASE_URL from Render connection-info when possible, else prompt (or `--no-prompt` + secrets).
+
+**Alternative: beacon-app-min (multi-app / in-platform)** — Create repo from **beacon-app-min** template, then run **render-bootstrap-multi-app.sh** (in the new repo). Use **--in-platform** to create only -db and -api (no frontend); app UI runs inside Beacon frontend. See beacon-app-min README and docs/MULTI_APP_RUNBOOK.md.
 
 **One-command (Beacon-pattern):**  
 `./scripts/create-new-app.sh <ORG> <APP_NAME> <OWNER_ID> [PARENT] [--secrets-file PATH]`  
@@ -76,7 +82,9 @@ From **setup-new-app**, with **RENDER_API_KEY** set:
 - Creates **{APP_NAME}-db**, **-api**, **-frontend** with canonical build/start/publish.
 - Creates project, assigns services, sets **VITE_API_URL**, adds SPA rewrite `/*` → `/index.html`.
 - Prompts for Internal Database URL (paste when ready or Enter to skip and set later) and Clerk keys (optional).
-- **beacon-pattern** creates two Postgres by default (`{APP_NAME}-platform-db`, `{APP_NAME}-db`) and sets PLATFORM_DATABASE_URL and DATABASE_URL on the API.
+- **beacon-pattern** creates two Postgres by default (`{APP_NAME}-platform-db`, `{APP_NAME}-db`) and set PLATFORM_DATABASE_URL and DATABASE_URL on the API.
+
+**For in-platform apps (app UI inside Beacon frontend):** use **beacon-app-min** template and **render-bootstrap-multi-app.sh --in-platform** (creates only -db and -api). Then add app module + route in Beacon repo, set `VITE_<APP_NAMESPACE>_API_URL` on Beacon frontend and `FRONTEND_URL` on app API; register app in Platform Admin. See beacon-app-min docs/MULTI_APP_RUNBOOK.md and Beacon DEPLOYMENT.md.
 
 ---
 
@@ -95,7 +103,38 @@ New apps created via **minimal-beacon-pattern.sh** use **@beacon/app-stub** (whe
 
 ## 8. Adding an app to an existing platform (multi-app)
 
-**Current state:** Schema supports App and TenantAppSubscription (see [MULTI_APP_SUPPORT.mdc](MULTI_APP_SUPPORT.mdc)). **Standalone** pattern: each app is a separate deployment (own repo, Render services, DB). **Multi-app platform** (one platform, multiple apps, app switcher) requires backend APIs (apps, tenant-subscriptions), service layer, and app switcher UI — not yet implemented. To **deploy a new standalone app**, use create-new-app.sh / minimal-beacon-pattern + render script as above.
+**Multi-origin (chosen approach):** Each app has a **separate repo and deployment**. The platform does not host all apps in one SPA; each app has its own **launch URL** (e.g. `https://psa.rankincoservices.com`). The platform stores the launch URL per App. Tenants subscribe to apps; after tenant selection, an **app launcher** shows subscribed apps as links; the tenant clicks to open the app. See [MULTI_APP_SUPPORT.mdc](MULTI_APP_SUPPORT.mdc) for full design.
+
+**Flow to make an app available on the platform (not yet implemented):**
+
+1. **Platform admin creates app definition** — In platform admin (Apps page), create an App record: namespace (e.g. `psa`), name, description, version, status (draft | published), launch_url. Draft = not in tenant catalog; platform admins can **see and run draft apps for testing**. Published = available for subscription.
+2. **Manifest for developer** — The system **derives** a manifest (JSON) from the App record (appId, namespace, name, version, platformApiUrl). Platform admin can "Download manifest"; the developer includes this in the app-stub (e.g. `beacon-app-manifest.json` or env at build). The app uses it to identify itself to the platform. No secrets in the manifest.
+3. **Subscriptions** — Platform admin assigns tenants to **published** apps (TenantAppSubscription) via the Subscriptions page (or equivalent). Only published apps appear in the subscription catalog.
+4. **Tenant launch** — Tenant users see only subscribed (published) apps in the app launcher; they click to open each app’s launch URL (multi-origin).
+
+**Current state:** Schema supports App and TenantAppSubscription. Backend APIs (apps, tenant-subscriptions), platform admin UI (Apps page, Subscriptions page), manifest derivation, and app launcher are not yet implemented. To **deploy a new standalone app** (repo + Render), use create-new-app.sh / minimal-beacon-pattern + render script as above; **registering** that app with the platform (create App record, set launch_url, download manifest) will use the flow above once implemented.
+
+---
+
+## 8.1 Beacon-app-stub repo and developer workflow
+
+**Who creates and maintains beacon-app-stub:** The **platform team** (not developers) creates the **beacon-app-stub** repo and sets it up. The repo lives at `RankinCo-Services/beacon-app-stub` (or equivalent). Only the platform team has **write/push access** to beacon-app-stub. Developers never push to it.
+
+**Developer workflow — create a new app, never modify the stub:** Developers do **not** clone beacon-app-stub and then push back to it. They **create a new app from the stub**, then work only in **that new app repo** and push there.
+
+**Ways to create a new app from the stub:**
+
+1. **GitHub "Use this template"** — Mark beacon-app-stub as a **template repo** (Settings → Template repository). Developer clicks "Use this template" → creates a **new repo** (e.g. `RankinCo-Services/my-reg-e-app`) with the stub’s contents. The new repo has **no shared history or remote** with beacon-app-stub. Developer clones **their** new repo, works there, pushes only to that repo. They cannot push to beacon-app-stub because they never have it as a remote (or if they add it as `upstream`, they don’t have write access).
+2. **Script "create new app from stub"** — A script (in setup-new-app or in beacon-app-stub) creates a new repo (e.g. via GitHub API from template, or clone stub → push to new repo), then the developer clones **the new repo** and works there. They never clone beacon-app-stub for day-to-day work.
+3. **Clone + new remote (runbook)** — Developer clones beacon-app-stub, creates an **empty** new repo (e.g. `RankinCo-Services/my-new-app`), renames `origin` to `upstream`, adds the new repo as `origin`, pushes to `origin`. From then on they work in that clone and push only to `origin` (their app). They do **not** push to `upstream` (beacon-app-stub). If they don’t have write access to beacon-app-stub, `git push upstream` fails (403) even if they try.
+
+**Protection against overwriting beacon-app-stub:**
+
+- **Access control:** Only platform team has write/push access to `RankinCo-Services/beacon-app-stub`. Developers are not collaborators with write. So they cannot push to beacon-app-stub.
+- **Template repo:** Prefer "Use this template" or a script that creates a **new repo** from the stub so developers never have beacon-app-stub as their primary remote.
+- **Runbook:** Document clearly: "Create a new app from the beacon-app-stub template; work and push only in your new app repo. Do not push to beacon-app-stub."
+
+**Summary:** Platform team creates and maintains beacon-app-stub; developers create **new app repos** from it (template or script) and push only to those new repos. They never push to beacon-app-stub, and they don’t have write access so they can’t overwrite or modify it.
 
 ---
 
@@ -117,7 +156,8 @@ When the user says: **"create a new app in RankinCo Services named \<app name\>"
 
 ## 11. Not yet implemented
 
-- **Multi-app platform:** Register new app with existing platform DB; assign tenants to apps via UI; app switcher. See MULTI_APP_SUPPORT.mdc.
+- **Multi-app platform:** Platform admin Apps page (CRUD apps, download manifest, draft/published, launch_url); platform admins can see and run draft apps for testing; Subscriptions page (assign tenants to published apps); app launcher (tenant sees subscribed apps, opens launch URLs). Manifest derived from App record; developer includes manifest in app-stub to link app to platform. Multi-origin: separate repo and deployment per app. See [MULTI_APP_SUPPORT.mdc](MULTI_APP_SUPPORT.mdc).
+- **Publish-ready app-stub (3-app model):** New app-stub **repo on GitHub under RankinCo-Services org** (created and maintained by **platform team**; developers do not push to it). Correctly implements the 3-app model and is set up from the start to be published: assumes platform exists; consumes beacon-tenant and beacon-app-layout; uses manifest/platform URL for identity; deploy creates **only app** Render services (api, frontend, app db), not platform services. Repo contains **scripts or a runbook** to automatically create and configure those Render services so the app **bootstraps itself on first build**. **Developer workflow:** Developers create a **new app** from the stub (GitHub "Use this template" or script) → clone and work only in that new app repo → push only to that repo. Only platform team has write access to beacon-app-stub so developers cannot overwrite or modify it. See multi-app-platform plan.
 
 ---
 
