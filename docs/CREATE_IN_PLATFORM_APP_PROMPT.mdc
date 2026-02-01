@@ -1,0 +1,126 @@
+---
+description: Reusable prompt to create a new beacon-app-min in-platform app with minimal user interaction. Use when the user asks to create a new in-platform app by name.
+globs: ["**/appApis*", "**/InPlatformAppPage*", "**/permissionSeeder*", "**/render-bootstrap*"]
+---
+
+# Create new in-platform beacon-app-min app (minimal interaction)
+
+Use this when the user says: **"Create a new in-platform beacon-app-min app named \<APP_NAME\>"** or **"Create a new Beacon in-platform app \<APP_NAME\>"**. Execute the steps below with minimal user interaction. Only prompt for values that cannot be inferred or read from env/secrets.
+
+**Input:** `<APP_NAME>` — app slug (e.g. `e2e-test`, `my-cool-app`). Lowercase, hyphens only.
+
+**Constants:** `ORG=RankinCo-Services`, `OWNER_ID=tea-d5qerqf5r7bs738jbqmg`, `REPO_URL=https://github.com/RankinCo-Services/<APP_NAME>`.
+
+**Note:** This prompt is for **dashboard-only** in-platform apps (single page, like beacon-app-min). For **full-app** in-platform apps (many routes and navigation, like beacon-grc), use the Beacon in-platform app pattern: app repo as Beacon submodule, exportable UI package, Beacon mounts at `/apps/<namespace>/*`. See [MULTI_APP_SUPPORT.mdc](MULTI_APP_SUPPORT.mdc) § In-platform Beacon app pattern.
+
+---
+
+## Prerequisites (user must have)
+
+- `gh` CLI authenticated; `jq`, `curl` installed.
+- `RENDER_API_KEY` set in environment (or in `scripts/.secrets` in the new repo).
+- For zero-prompt bootstrap: in the new app repo `scripts/.secrets` (create after clone), set `BEACON_FRONTEND_URL=https://beacon-frontend-sy4c.onrender.com` (or the current Beacon frontend URL). Optionally `DATABASE_URL` (script can fetch from Render when available).
+
+---
+
+## Step 1: Create repo, clone, bootstrap (automated)
+
+Run from a directory where the clone is allowed (e.g. `$HOME/GitHub` or project root):
+
+```bash
+gh repo create RankinCo-Services/<APP_NAME> --template RankinCo-Services/beacon-app-min --private --clone
+cd <APP_NAME>
+git submodule update --init --recursive
+```
+
+If `RENDER_API_KEY` is not in the environment, load it: `source scripts/.secrets` (after creating `scripts/.secrets` with `export RENDER_API_KEY=...` and optionally `BEACON_FRONTEND_URL=...`).
+
+Then run the bootstrap script **with `--in-platform` and `--no-prompt`** (so no interactive prompts; use secrets/env for DATABASE_URL and BEACON_FRONTEND_URL):
+
+```bash
+./scripts/render-bootstrap-multi-app.sh <APP_NAME> tea-d5qerqf5r7bs738jbqmg https://github.com/RankinCo-Services/<APP_NAME> --in-platform --no-prompt
+```
+
+If the user does not have `BEACON_FRONTEND_URL` in secrets and the script logs that DATABASE_URL or CORS URL is missing, tell them to add `BEACON_FRONTEND_URL` to `scripts/.secrets` and re-run the script, or set `FRONTEND_URL` later on the app’s API service in Render.
+
+Then push:
+
+```bash
+git push origin main
+```
+
+Note the app API URL: `https://<APP_NAME>-api.onrender.com` (e.g. `https://e2e-test-api.onrender.com`).
+
+---
+
+## Step 2: Add app to Beacon repo (code changes)
+
+In the **Beacon** repo (not the new app repo):
+
+1. **`frontend/src/config/appApis.ts`**
+   - Add to `APP_APIS`: `'<APP_NAME>': import.meta.env.VITE_<APP_NAME_SCREAMING_SNAKE>_API_URL || 'https://<APP_NAME>-api.onrender.com'`.
+   - Add to `IN_PLATFORM_APP_DISPLAY_NAMES`: `'<APP_NAME>': '<Display Name>'` (e.g. `'e2e-test': 'E2E Test'`).
+   - `<APP_NAME_SCREAMING_SNAKE>` = app name in SCREAMING_SNAKE_CASE (e.g. `e2e-test` → `E2E_TEST`).
+
+2. **App module**
+   - Copy `frontend/src/apps/multi-app-test/` to `frontend/src/apps/<APP_NAME>/`.
+   - Rename the page component and file to match (e.g. `E2eTestDashboardPage.tsx`).
+   - Inside the new component, ensure the health/API base URL uses `getAppApiBaseUrl('<APP_NAME>')` or the same env pattern as multi-app-test.
+
+3. **`frontend/src/apps/InPlatformAppPage.tsx`**
+   - Import the new page component.
+   - Add to `APP_MODULES`: `'<APP_NAME>': <NewDashboardPageComponent>`.
+
+4. **Register app in platform (seed)**
+   - In `backend/src/utils/permissionSeeder.ts`, add a block for the new app (same pattern as `multi-app-test`): `findUnique` by `namespace: '<APP_NAME>'`; if not found, `create` with `namespace`, `name`, `description`, `status: 'published'`, `launch_url: null` (in-platform apps use **namespace** only; no Launch URL), `version: '1.0.0'`; else `update` to set `status`, `version`.
+   - If creating the app manually in **Platform Admin → Apps** instead of seeding: set **Namespace** = `<APP_NAME>`, **Name**, **Description**, **Launch URL: leave blank**, **Status** = Published. In-platform apps are opened by namespace; Launch URL must be blank.
+
+---
+
+## Step 3: Render environment variables (automated via MCP)
+
+**Agent must:** Use Render MCP so env vars and redeploys are automatic; then monitor until both services are live.
+
+1. **Select workspace:** `select_workspace` with `ownerID`: `tea-d5qerqf5r7bs738jbqmg` (RankinCo Services).
+2. **Get service IDs:** `list_services`. Find `beacon-frontend` and `<APP_NAME>-api`; note their `id` and `serviceDetails.url` (or slug-based URL `https://<APP_NAME>-api-<slug>.onrender.com`).
+3. **Set env vars (triggers redeploy):**
+   - **beacon-frontend:** `update_environment_variables` with `serviceId` = beacon-frontend ID, `envVars`: `[{ "key": "VITE_<APP_NAME_SCREAMING_SNAKE>_API_URL", "value": "https://<APP_NAME>-api-<slug>.onrender.com" }]`. Render triggers a new deploy automatically.
+   - **<APP_NAME>-api:** `update_environment_variables` with `serviceId` = &lt;APP_NAME&gt;-api ID, `envVars`: `[{ "key": "FRONTEND_URL", "value": "https://beacon-frontend-sy4c.onrender.com" }]` (or current Beacon frontend URL). Redeploy is triggered automatically.
+4. **Monitor until live:** From the MCP response or `list_deploys` (limit 1) for each service, get the latest `deployId`. Call `get_deploy` for each service until `status` is `live`. If status is `build_failed` or `deactivated`, check `list_logs` and fix; then re-run env var update or trigger redeploy via Render dashboard/API.
+
+**Fallback (no MCP):** Set the same env vars in Render dashboard (Environment) for beacon-frontend and &lt;APP_NAME&gt;-api, then trigger redeploy for both. The bootstrap script may have set `FRONTEND_URL` on the app API if `BEACON_FRONTEND_URL` was in secrets.
+
+---
+
+## Step 4: Subscriptions (optional)
+
+In Beacon, **Platform Admin → Subscriptions**: assign the new app to the tenants that should see it in the app launcher.
+
+**Creating the app in Platform Admin (if not seeded):** Use **Namespace** = app slug (e.g. `simple-to-do`), **Name**, **Description**, **Launch URL: leave blank** for in-platform apps, **Status** = Published. The launcher opens in-platform apps by **namespace** (route `/apps/<namespace>`); do not set Launch URL for in-platform apps.
+
+---
+
+## One-line user prompt (copy-paste)
+
+User can say:
+
+- **"Create a new in-platform beacon-app-min app named \<APP_NAME\>."**
+- **"Create a new Beacon in-platform app \<APP_NAME\> with minimal interaction."**
+
+Replace `<APP_NAME>` with the desired slug (e.g. `e2e-test`).
+
+---
+
+## Summary checklist
+
+| Step | Action |
+|------|--------|
+| 1a | `gh repo create RankinCo-Services/<APP_NAME> --template RankinCo-Services/beacon-app-min --private --clone` |
+| 1b | `cd <APP_NAME>` → `git submodule update --init --recursive` |
+| 1c | `./scripts/render-bootstrap-multi-app.sh <APP_NAME> tea-d5qerqf5r7bs738jbqmg https://github.com/RankinCo-Services/<APP_NAME> --in-platform --no-prompt` (with RENDER_API_KEY and optionally BEACON_FRONTEND_URL in env or scripts/.secrets) |
+| 1d | `git push origin main` |
+| 2 | In Beacon repo: appApis.ts, app module (copy multi-app-test), InPlatformAppPage.tsx, permissionSeeder.ts |
+| 3 | Render MCP: select_workspace → list_services → update_environment_variables (beacon-frontend, &lt;APP&gt;-api); monitor get_deploy until both `live` |
+| 4 | Platform Admin → Subscriptions: assign app to tenants (optional) |
+
+**Reference:** beacon-app-min [MULTI_APP_RUNBOOK.md](https://github.com/RankinCo-Services/beacon-app-min/blob/main/docs/MULTI_APP_RUNBOOK.md), rco-developer-docs [CREATE_NEW_BEACON_APP.md](CREATE_NEW_BEACON_APP.md).
