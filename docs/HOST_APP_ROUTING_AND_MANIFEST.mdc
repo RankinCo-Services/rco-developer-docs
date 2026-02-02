@@ -1,0 +1,106 @@
+---
+description: AUTHORITATIVE source for host-app routing and manifest pattern (host owns routing/nav; app supplies manifest + page content; single frontend; no app-owned Routes/NavigationProvider).
+globs: ["**/shell/**", "**/grcRoutes*", "**/grcNavigation*", "**/GrcApp*", "**/getManifest*", "**/getNavigation*", "**/beacon-app-layout/**", "**/AppLayout*", "**/NavigationProvider*"]
+---
+
+# AUTHORITATIVE – Host-App Routing and Manifest Pattern
+
+This document is the **source of truth** for how the host (beacon-tenant) and hosted apps (PSA, GRC) divide responsibility for routing, navigation, and page content. It is maintained in rco-developer-docs **docs/** and is used by junior developers and AI agents to stay aligned. **Do not re-derive this from conversation; use this doc.**
+
+**References:** Full inversion execution plan, Tenant as Central App plan, ARCHITECTURE_3APP_MODEL.md, beacon-architecture-rules.md (host-app section).
+
+---
+
+## 1. Core principle
+
+- **The host (beacon-tenant) owns routing.** The host uses the **app manifest** to **display the links** (sidebar and top nav). The host never delegates "routing" to an app.
+- **The app supplies the manifest and the page/content for each link.** The app defines which paths exist (manifest) and what to render at each path (content). The app does **not** own the router or the nav UI; it owns **data** (manifest) and **content** (pages).
+
+**One sentence:** Beacon-tenant uses the manifest to display the links; the app provides the page and the content for that link.
+
+---
+
+## 2. Terminology
+
+| Term | Meaning |
+|------|--------|
+| **Routing** | Which paths exist and what appears in the nav (sidebar/top nav). **Owned by the host.** |
+| **Manifest** | Data the app supplies: route definitions (paths, labels, structure) used by the host to build nav and routes. Can be JSON or a typed structure (e.g. NavSection[]). |
+| **Nav** | Sidebar and top nav items (links). **Provided by beacon-app-layout** (components); **driven by beacon-tenant** using the app manifest(s). |
+| **Page / content** | What renders when the user visits a path. **Provided by the app.** |
+
+**Do not say** "the app owns routing" when the app only supplies content for paths. The app owns **manifest** and **content**; the host owns **routing** and **nav**.
+
+---
+
+## 3. Who does what
+
+| Responsibility | Owner | Notes |
+|-----------------|--------|--------|
+| Which routes exist (path list, structure) | App (defines in manifest) | App never implements the router; it only defines. |
+| Display of links (sidebar, top nav) | Host (beacon-tenant) | Host builds nav from manifest; uses beacon-app-layout for components. |
+| What renders at each path (page content) | App | App provides components/pages for each path. |
+| Single frontend deploy | Host (beacon-tenant) | One Render frontend for all hosted apps; no per-app frontend services for in-platform apps. |
+| Platform services (RBAC, audit, auth) | Host | Apps use services layer from @beacon/tenant-ui; no direct tenant API calls. |
+| UI components and styling | beacon-app-layout | Host and apps both use app-layout for consistent UI. |
+
+---
+
+## 4. Single frontend and package naming
+
+- **One frontend:** For the inversion (tenant-as-host), **beacon-tenant** builds the single shell and serves all page content for PSA and GRC. There is **one** frontend web service (e.g. beacon-inversion-frontend). This avoids multiple domains, resource sprawl, and Clerk/auth issues.
+- **Package naming:** Prefer **@beacon-tenant/psa-ui** and **@beacon-tenant/grc-ui** (or equivalent tenant-scoped names) so the host does not depend on another app's package namespace. Source code can still live in Beacon and beacon-grc repos (e.g. submodules); the **built** package consumed by the shell is published or linked under the tenant namespace.
+
+---
+
+## 5. Services layer
+
+- All platform calls (RBAC, audit, auth, tenant context) go through the **services layer** provided by the host (@beacon/tenant-ui). Apps do not call tenant-scoped APIs directly.
+- Apps are responsible for **their data and logic**; they use **host services** for platform functions.
+
+---
+
+## 6. Refactor sketch: from "app owns Routes + nav" to "host owns routes/nav from manifest"
+
+**Current state (e.g. GRC today):** The app component (e.g. GrcApp) wraps its subtree in its own `<Routes>` and passes nav into `NavigationProvider` + `AppLayout`. So the app both defines nav (getNavigation) and implements path→component (Route tree) **inside** its mount. The host only has one route per app: e.g. `<Route path="grc/*" element={<GrcApp basePath="/grc" />} />`.
+
+**Target state:**
+
+1. **App exports a manifest** (route definitions: paths, labels, section/tab structure). Format can be the same as today's navigation config (e.g. NavSection[], level2, level3) or a JSON manifest. The app does **not** render a router or nav; it only exports this data.
+2. **Host (beacon-tenant)** at build or runtime:
+   - Loads each app's manifest (from app packages or a registry).
+   - Builds the **sidebar and top nav** from the combined manifests (e.g. when "GRC" is active, show GRC's nav items).
+   - Creates **Route** elements for each path in the manifest, mapping path → app and path → component. The host owns the single `<Routes>` tree.
+3. **App exports page/content components** (or a single "content renderer" that receives current path and returns the right component). The host renders `<Route path="grc/policies/:id" element={<PolicyDetailPage />} />` where `PolicyDetailPage` is imported from the app package. So the app supplies components; the host wires them to routes.
+
+**Concrete refactor steps:**
+
+| Step | Where | What |
+|------|--------|------|
+| 1 | App (e.g. grc-ui) | Export **getManifest(basePath)** (or equivalent) that returns route definitions (sections, tabs, paths). Keep existing getNavigation shape if it already serves as manifest; ensure it is consumable by the host. |
+| 2 | App (e.g. grc-ui) | Export **page components** (or a map path → component) so the host can render them. Do **not** export a component that wraps Routes + NavigationProvider; export individual pages or a content renderer. |
+| 3 | Host (beacon-tenant shell) | **Build nav from manifest:** For the active app (e.g. GRC), call getManifest(basePath), then pass the result to beacon-app-layout (NavigationProvider + AppLayout or equivalent) to render the sidebar/top nav. |
+| 4 | Host (beacon-tenant shell) | **Build routes from manifest:** For each path in the manifest, create `<Route path={...} element={<... />} />` where the element is the app's page component for that path. Host owns the single Routes tree. |
+| 5 | Host | Remove mounting of "app as single component that owns its own Routes" (e.g. `<Route path="grc/*" element={<GrcApp />} />`). Replace with many routes built from manifest + app page components. |
+| 6 | App | Remove internal `<Routes>` and `NavigationProvider` from GrcApp (or equivalent). GrcApp either disappears or becomes a thin "content renderer" that receives path and returns the right page component; host still owns the Route tree. |
+
+**Migration:** Can be done in phases: first add getManifest and export page components; then host builds nav from manifest while still mounting GrcApp for content (GrcApp stops rendering nav, only content). Then host builds routes from manifest and mounts page components directly.
+
+---
+
+## 7. What to check in architecture review
+
+- **Host owns routing:** Shell/router and nav (sidebar, top nav) are built and owned by beacon-tenant, not by app components.
+- **App supplies manifest + content:** Apps export manifest (route definitions) and page components; they do not export a full app that owns `<Routes>` or `NavigationProvider`.
+- **Single frontend:** Inversion uses one frontend deploy (beacon-tenant shell) for all hosted apps.
+- **Services layer:** Apps use @beacon/tenant-ui services for platform functions; no direct tenant API calls.
+- **Package naming:** Prefer tenant-scoped package names for app UIs consumed by the host (@beacon-tenant/*) to avoid host depending on another app's namespace.
+
+---
+
+## 8. References
+
+- **Enforcement:** `.cursor/references/beacon-architecture-rules.md` (Host-app routing and manifest section).
+- **3-app model:** [ARCHITECTURE_3APP_MODEL.md](ARCHITECTURE_3APP_MODEL.md).
+- **Security/compliance review:** [SECURITY_AND_COMPLIANCE_REVIEW.mdc](SECURITY_AND_COMPLIANCE_REVIEW.mdc) (architecture review step).
+- **Plans:** Full inversion execution plan; Tenant as Central App plan.

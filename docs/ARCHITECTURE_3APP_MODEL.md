@@ -41,8 +41,15 @@ The host backend instantiates both Prisma clients and passes platformPrisma into
 
 ---
 
+## Host-app routing and manifest (inversion)
+
+When **beacon-tenant** is the host (e.g. inversion shell), the host **owns routing and nav**; hosted apps (PSA, GRC) supply a **manifest** (route definitions) and **page content** only. Apps do not own `<Routes>` or `NavigationProvider`; the host builds nav and routes from the manifest. See **[HOST_APP_ROUTING_AND_MANIFEST.md](HOST_APP_ROUTING_AND_MANIFEST.md)** (and [HOST_APP_ROUTING_AND_MANIFEST.mdc](HOST_APP_ROUTING_AND_MANIFEST.mdc)) for the full pattern, refactor sketch, and architecture-review checklist.
+
+---
+
 ## References
 
 - **Enforcement rules:** `.cursor/references/beacon-architecture-rules.md` (in this repo; copied into projects).
+- **Host-app routing and manifest:** [HOST_APP_ROUTING_AND_MANIFEST.md](HOST_APP_ROUTING_AND_MANIFEST.md) — host owns routing/nav; app supplies manifest + content.
 - **Beacon-specific deep dive:** Beacon repo `docs/ARCHITECTURE_ANALYSIS.md`.
 - **Services layer detail:** beacon-tenant `docs/SERVICES_LAYER_ARCHITECTURE.md`.
