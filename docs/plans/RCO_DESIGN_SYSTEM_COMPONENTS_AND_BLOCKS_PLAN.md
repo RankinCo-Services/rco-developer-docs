@@ -238,7 +238,9 @@ Base shell (§6.3) owns: type (accent), accountingBasis (badge), label, value, l
 
 **Graph styling per type:** In beacon-app-layout `globals.css`, each `.graph-card-chart-type-*` defines variables (e.g. line: `--graph-line-stroke`, `--graph-fill`; bar: `--graph-bar-fill`; area: same as line with stronger fill). Apps (or Storybook placeholders) use these variables so all graph visuals are driven by globals.
 
-**Implementation:** GraphCard in beacon-app-layout; size and chart-type classes and progress percentage classes (e.g. `.graph-card-progress-pct-0` … `.graph-card-progress-pct-100` in 5% steps) in globals. Stories demonstrate line, bar, horizontal bar, and area with `var(--graph-*)` in placeholder charts.
+**Implementation:** GraphCard component and GraphCard.stories in beacon-app-layout; size and chart-type classes and progress percentage classes (e.g. `.graph-card-progress-pct-0` … `.graph-card-progress-pct-100` in 5% steps) in globals.css. Stories demonstrate line, bar, horizontal bar, and area with `var(--graph-*)` in placeholder charts. Exported from app layout index.
+
+**Reference images (design reference; final UI uses app layout styling):** Project Health (line, progress, status, footer): `image-ce23fa50-2860-464e-9bc2-a2f7a750b1ce.png`. Revenue by segment (horizontal bar, blue, header action): `image-98513983-e71e-4c1a-a4be-b72ba6228eb1.png`. Revenue & hours trend (area): `image-1eca8021-6d16-47c1-a3ff-e7f01ce15cff.png`. By customer top 10 (horizontal bar, orange/alt): `image-4a3dd573-a1c8-4f92-ab7b-6eb6b1f1a442.png` (in `.cursor/projects/Users-matt-GitHub-Beacon/assets/` or equivalent).
 
 ---
 
