@@ -5,9 +5,11 @@ alwaysApply: true
 
 # RCO Deploy Workflow
 
-## Mandatory deploy workflow (when user says "deploy" or "deploy all")
+**Default:** After completing implementation, you **must** run the full workflow below (commit, push, sync when applicable, monitor Render) unless the user says otherwise (e.g. "don't deploy," "just commit"). When the user says **"deploy"** or **"deploy all"**, execute the same full workflow. Do not only suggest commands.
 
-**Exact workflow every time:** ESLint (zero errors) → security compliance → architecture review → run the project's deploy script → monitor Render and fix errors. When the user says **"deploy"** or **"deploy all"**, you **must** execute this full workflow. Do not only suggest commands.
+## Mandatory deploy workflow (every time you run it)
+
+**Exact workflow every time:** ESLint (zero errors) → security compliance → architecture review → run the project's deploy script → monitor Render and fix errors.
 
 **Goal (unless the user says otherwise):** Run the entire pipeline deployment to Render and fix issues until the services are live. Do not consider the workflow complete until the relevant Render services are live or the user indicates otherwise.
 
@@ -23,12 +25,6 @@ alwaysApply: true
 
 ---
 
-## After code changes (when user did NOT say "deploy" or "deploy all")
+## Default after implementation
 
-After every code change, or when giving instructions that require the user to implement, resolve, or deploy something:
-
-1. **Output a "Deploy / next steps" section** with:
-   - **Deploy command** with a **commit message you generate** from your recent changes. Do **not** run the deploy script unless the user says "deploy" or "deploy all".
-   - **Additional steps**, if any: If deploy or its scripts do not fully cover what's needed, list the exact implementation steps in order.
-
-2. **When to include extra steps:** Include them whenever the user must do something beyond the deploy command — e.g. run a migration script, run `prisma migrate resolve` in Render Shell, add/change a Render env var, or perform a manual fix before deploying.
+**Unless the user specifies otherwise** (e.g. "just make the change, don't deploy" or "only commit"), after completing implementation you **must** run the full workflow: ESLint → predeploy → security and architecture review → **commit → push** (development only; never push `main` unless user promotes) → **sync Beacon submodule in beacon-tenant** (when working in Beacon) → **push beacon-tenant** → **monitor Render** and fix build/deploy errors until services are live → summary. Do not only suggest commands—execute the workflow. See project `.cursor/rules/post-implementation-workflow.mdc` or `.cursor/rules/beacon.mdc` for exact steps. If the user says "don't deploy," "don't push," or "just commit," follow that and skip the steps they exclude.

@@ -55,7 +55,7 @@ When the deploy script runs without `--skip-checks`, it typically runs `./script
 
 - **Do not consider the workflow complete** until the relevant Render services are live.
 - **Security and architecture reviews** are mandatory for all commits, pushes, deploys, and for any Cursor plans and solution planning. All committed code must comply.
-- **Do not run the deploy command** unless the user explicitly asks; scripts can fail and the user may need to intervene. After code changes, output a "Deploy / next steps" section with the deploy command and commit message.
+- **Default after implementation:** Unless the user specifies otherwise (e.g. "don't deploy" or "just commit"), the agent must run the full workflow including commit, push, sync (Beacon submodule in beacon-tenant when applicable), and monitor Render until services are live. Do not only suggest commands. If the user says "don't deploy," "don't push," or "just commit," follow that and skip the steps they exclude.
 
 ---
 
