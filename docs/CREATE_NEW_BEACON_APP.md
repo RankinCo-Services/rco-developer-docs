@@ -1,195 +1,440 @@
-# How to Create a New App for Beacon (Junior Developer Guide)
+# How to Create a New App for Beacon (Post-Inversion)
 
-Step-by-step instructions for creating a new app that works with the Beacon platform. Choose **Path A** (standalone: your app has its own frontend URL) or **Path B** (in-platform: your app runs inside Beacon’s UI at `/apps/your-app`).
+Step-by-step instructions for creating a new app in the **post-inversion** Beacon architecture.
 
 ---
 
-## Before You Start
+## Architecture overview (read this first)
 
-**Get these from your lead or Render/GitHub:**
+**Post-inversion:** `beacon-tenant` is the deployed shell host. It owns the frontend, auth, layout, and routing for everything. Your new app contributes:
+
+1. **A backend API** — Express + Prisma, its own Postgres DB, deployed as its own Render service.
+2. **A UI package** — a React library (`packages/<your-app>-ui/`) that exports pages, navigation, and route definitions. The shell imports this package and mounts your pages into its layout.
+
+Your app repo (cloned from `beacon-app-min`) lives as a **submodule inside `beacon-tenant`** so the shell can resolve the UI package at build time. The `frontend/` directory in beacon-app-min is a standalone dev harness (useful for isolated work), but the shell does not use it — it uses the UI package directly.
+
+**What the shell imports from your UI package:**
+
+| Export | What it is |
+|--------|------------|
+| `getManifest(basePath)` | Returns `{ navigation, level2Navigation, level3Navigation }` — the nav structure |
+| `routeDefinitions` | Array of `{ path: string, component: ComponentType }` the shell mounts as `<Route>` elements |
+
+> **Critical:** `getManifest` must be **defined inline** in your `packages/<app>-ui/src/index.ts`, not re-exported from another file. Rollup won't follow re-exports from a pre-built dist — the build will fail with "not exported". See [INVERSION_SHELL_BUILD_AND_LAYOUT.md](../beacon-tenant/docs/INVERSION_SHELL_BUILD_AND_LAYOUT.md) §1 for the full story.
+
+---
+
+## Before you start
+
+**Get these from your lead:**
 
 | What | Example | Where |
 |------|---------|--------|
-| **App name** (slug) | `my-cool-app` | You pick. Use lowercase, hyphens only. No spaces. |
+| **App name** (slug) | `my-cool-app` | You pick. Lowercase, hyphens only, no spaces. |
 | **RENDER_API_KEY** | `rnd_xxx...` | [Render Dashboard → Account → API Keys](https://dashboard.render.com/u/settings?add-api-key) |
-| **Render workspace ID** | `tea-d5qerqf5r7bs738jbqmg` | RankinCo Services. Your lead can confirm. |
+| **Render workspace ID** | `tea-d5qerqf5r7bs738jbqmg` | RankinCo Services. |
+| **PLATFORM_API_URL** | `https://beacon-platform-api.onrender.com` | The live platform API URL. |
+| **PLATFORM_INTERNAL_SECRET** | `some-secret` | Shared secret for tenant validation. Ask your lead. |
 
 **On your machine:**
 
 - GitHub account with access to **RankinCo-Services** org
-- **Git** and **Bash** (Terminal)
-- **jq** and **curl** (install with Homebrew if needed: `brew install jq`)
+- Git, Bash, `jq`, `curl` (install with `brew install jq` if needed)
+- Node.js (same version as the project — check `.nvmrc` in beacon-tenant)
 
 ---
 
-## Path A: Standalone App (your own frontend URL)
+## Step 1: Create the app repo from the template
 
-Your app will have its own URL (e.g. `https://my-cool-app-frontend.onrender.com`) and its own database and API.
-
-### Step 1: Create the repo from the template
-
-1. Open **beacon-app-min** on GitHub:  
-   `https://github.com/RankinCo-Services/beacon-app-min`
+1. Open **beacon-app-min** on GitHub: `https://github.com/RankinCo-Services/beacon-app-min`
 2. Click the green **Use this template** button → **Create a new repository**.
-3. **Do not fork.** Use “Use this template” so the new repo has no shared history.
+3. **Do not fork.** Use "Use this template".
 4. Set:
-   - **Owner:** RankinCo-Services  
-   - **Repository name:** your app slug (e.g. `my-cool-app`)  
-   - **Private** (unless told otherwise)
-5. Click **Create repository**. Leave “Add a README” unchecked.
+   - **Owner:** RankinCo-Services
+   - **Repository name:** your app slug (e.g. `my-cool-app`)
+   - **Private**
+5. Click **Create repository**.
 
-### Step 2: Clone and bootstrap Render
-
-In Terminal (replace `my-cool-app` with your app name and use your actual Render workspace ID if different):
+Clone it:
 
 ```bash
 git clone https://github.com/RankinCo-Services/my-cool-app.git
 cd my-cool-app
-```
-
-Set your Render API key for this session (or put it in `scripts/.secrets` — see Optional below):
-
-```bash
-export RENDER_API_KEY=your_key_here
-```
-
-Run the bootstrap script (creates database, API, and frontend on Render):
-
-```bash
-./scripts/render-bootstrap-multi-app.sh my-cool-app tea-d5qerqf5r7bs738jbqmg https://github.com/RankinCo-Services/my-cool-app
-```
-
-- When prompted for **Internal Database URL**: wait 1–2 minutes after the script creates the DB, then in [Render Dashboard](https://dashboard.render.com) open **my-cool-app-db** → **Info** → copy **Internal Database URL** and paste it. Or press Enter to skip and set it later on the **my-cool-app-api** service.
-
-### Step 3: Push to trigger deploy
-
-```bash
-git push origin main
-```
-
-Go to [Render Dashboard](https://dashboard.render.com) → your app’s project. Wait for **my-cool-app-api** and **my-cool-app-frontend** to finish deploying. Open the frontend URL (e.g. `https://my-cool-app-frontend.onrender.com`) and confirm you see **Database: connected**.
-
-**Optional (no prompts):** Create `scripts/.secrets` (do not commit) with:
-
-```bash
-export RENDER_API_KEY=...
-# export DATABASE_URL=...   # optional; script can get from Render
-```
-
-Then run the script with `--no-prompt`:
-
-```bash
-./scripts/render-bootstrap-multi-app.sh my-cool-app tea-d5qerqf5r7bs738jbqmg https://github.com/RankinCo-Services/my-cool-app --no-prompt
+git submodule update --init --recursive
 ```
 
 ---
 
-## Path B: In-Platform App (runs inside Beacon)
+## Step 2: Bootstrap Render (database and API only)
 
-Your app’s UI will live inside Beacon at `/apps/my-cool-app`. You only create the app’s **database** and **API**; Beacon’s frontend hosts the UI.
-
-### Step 1: Create the repo from the template
-
-Same as Path A: **Use this template** from **beacon-app-min** → new repo under **RankinCo-Services** with your app name (e.g. `my-cool-app`).
-
-### Step 2: Clone and bootstrap with `--in-platform`
+Your app needs a Postgres database and an API service. There is **no separate frontend** — the shell (beacon-tenant) hosts your UI.
 
 ```bash
-git clone https://github.com/RankinCo-Services/my-cool-app.git
-cd my-cool-app
 export RENDER_API_KEY=your_key_here
-```
-
-Run the script **with `--in-platform`** (creates only database and API, no frontend):
-
-```bash
 ./scripts/render-bootstrap-multi-app.sh my-cool-app tea-d5qerqf5r7bs738jbqmg https://github.com/RankinCo-Services/my-cool-app --in-platform
 ```
 
-- When prompted for **Internal Database URL**: same as Path A (copy from Render → my-cool-app-db → Info → Internal Database URL, or Enter to set later).
-- When prompted for **BEACON_FRONTEND_URL**: enter Beacon’s frontend URL (e.g. `https://beacon-frontend-sy4c.onrender.com`). Your lead can give you the exact URL. This is used so your app API allows requests from Beacon (CORS).
+Using `--in-platform` creates only `-db` and `-api` (no frontend service).
 
-### Step 3: Push and note your API URL
+- When prompted for **Internal Database URL:** wait 1–2 min, then Render Dashboard → `my-cool-app-db` → Info → copy Internal Database URL.
+- When prompted for **BEACON_FRONTEND_URL:** enter the shell's frontend URL (e.g. `https://beacon-inversion-frontend.onrender.com`). This sets CORS on your API.
 
 ```bash
 git push origin main
+git checkout -b development
 ```
 
-After deploy, your app API URL will be something like:  
-`https://my-cool-app-api.onrender.com`  
-(Check Render → **my-cool-app-api** → URL.) You’ll need this for Beacon.
+> This initial push to `main` is needed to trigger Render to deploy the bootstrapped API service. After this, all ongoing work is done on the `development` branch (see branch note in Step 9).
 
-### Step 4: Add your app to the Beacon repo (code changes)
+Once deployed, set these on your API service in Render:
 
-Someone with access to the **Beacon** repo (you or your lead) must add the in-platform app there. Namespace = app slug (e.g. `my-cool-app`).
-
-1. **API config** — In Beacon repo, edit `frontend/src/config/appApis.ts`:
-   - Add your app’s API URL to the `APP_APIS` object (key = namespace, value = API URL).
-   - Add a display name to `IN_PLATFORM_APP_DISPLAY_NAMES` (key = namespace, value = label for sidebar).
-
-   Example for `my-cool-app`:
-
-   ```ts
-   const APP_APIS: Record<string, string> = {
-     'multi-app-test': import.meta.env.VITE_MULTI_APP_TEST_API_URL || '...',
-     'my-cool-app': import.meta.env.VITE_MY_COOL_APP_API_URL || 'https://my-cool-app-api.onrender.com',
-   }
-   export const IN_PLATFORM_APP_DISPLAY_NAMES: Record<string, string> = {
-     'multi-app-test': 'Multi-App Test',
-     'my-cool-app': 'My Cool App',
-   }
-   ```
-
-2. **App module and route** — In Beacon repo:
-   - Add a folder and page component, e.g. `frontend/src/apps/my-cool-app/MyCoolAppDashboardPage.tsx` (you can copy and adapt from `frontend/src/apps/multi-app-test/`).
-   - In `frontend/src/apps/InPlatformAppPage.tsx`, register the component in the `APP_MODULES` object (key = namespace, value = the page component).
-
-3. **Route** — The route `/apps/:appSlug` already exists in Beacon; no change needed if you only add a new namespace and module.
-
-### Step 5: Set environment variables on Render
-
-**Beacon frontend (Render):**
-
-- Service: **beacon-frontend** (or whatever the Beacon frontend service is named).
-- Add env var:  
-  **Name:** `VITE_MY_COOL_APP_API_URL`  
-  **Value:** `https://my-cool-app-api.onrender.com`  
-  (Use your actual app API URL. The name is `VITE_` + namespace in SCREAMING_SNAKE_CASE + `_API_URL`.)
-- Redeploy Beacon frontend so the new value is baked into the build.
-
-**Your app API (Render):**
-
-- Service: **my-cool-app-api**.
-- Ensure **FRONTEND_URL** = Beacon frontend URL (e.g. `https://beacon-frontend-sy4c.onrender.com`). The bootstrap script may have set this if you entered BEACON_FRONTEND_URL; if not, set it in the API service’s environment variables and redeploy.
-
-### Step 6: Register the app in the platform
-
-The app must be registered so it appears in Beacon’s app launcher. **Restarting the Beacon API does not auto-discover new apps** — the backend only seeds apps that are hardcoded in the seeder (today: `psa` and `multi-app-test`). Use one of these:
-
-- **Option A (seed):** Your lead adds the app in Beacon’s `backend/src/utils/permissionSeeder.ts` (same pattern as `multi-app-test`), then restarts/redeploys the Beacon API. After that, the app appears under **Platform Admin → Apps**.
-- **Option B (no code change):** A platform admin goes to **Platform Admin → Apps** → **Create app** and enters namespace (e.g. `my-cool-app`), name, launch URL (or leave blank for in-platform), status **Published**.
-
-Then in **Platform Admin → Subscriptions**, assign the app to the tenants that should see it in the launcher. See beacon-app-min [docs/MULTI_APP_RUNBOOK.md](https://github.com/RankinCo-Services/beacon-app-min/blob/main/docs/MULTI_APP_RUNBOOK.md) § “Adding a new app to the Beacon platform”.
-
-### Step 7: Verify
-
-1. Log into Beacon and open the app launcher.
-2. Your app should appear; open it.
-3. You should see Beacon’s layout with your app’s content at `/apps/my-cool-app` and **Database: connected** (if your page calls the app API’s health endpoint).
+| Variable | Value |
+|----------|-------|
+| `PLATFORM_API_URL` | Platform API base URL (e.g. `https://beacon-platform-api.onrender.com`) |
+| `PLATFORM_INTERNAL_SECRET` | The shared secret for `/internal/validate-tenant` |
 
 ---
 
-## Quick Reference
+## Step 3: Create the UI package
 
-| Path | Script | Creates | Where users open the app |
-|------|--------|--------|---------------------------|
-| **A: Standalone** | `render-bootstrap-multi-app.sh <app> <owner_id> <repo_url>` | -db, -api, -frontend | App’s own frontend URL |
-| **B: In-platform** | Same script with `--in-platform` | -db, -api only | Inside Beacon at `/apps/<namespace>` |
+Inside your app repo, create the `packages/my-cool-app-ui/` directory. This is what the shell will import.
+
+The structure mirrors `Beacon/packages/psa-ui/`:
+
+```
+packages/
+  my-cool-app-ui/
+    src/
+      index.ts           ← MUST inline getManifest here (not re-export)
+      navigation.ts      ← nav helpers (getNavigation, etc.)
+      routeDefinitions.tsx
+      pages/
+        DashboardPage.tsx
+    package.json
+    tsconfig.build.json
+```
+
+**`package.json`** (substitute your app name throughout):
+
+```json
+{
+  "name": "@beacon-tenant/my-cool-app-ui",
+  "version": "0.1.0",
+  "description": "My Cool App UI package for the Beacon shell.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "axios": "^1.6.5",
+    "lucide-react": "^0.344.0",
+    "react-router-dom": "^6.21.1"
+  },
+  "peerDependencies": {
+    "@beacon/app-layout": ">=0.1.0",
+    "@beacon/ui": ">=0.1.0",
+    "react": ">=18.0.0",
+    "react-router-dom": ">=6.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "react": "^18.2.0",
+    "typescript": "^5.3.0"
+  }
+}
+```
+
+**`src/navigation.ts`** — build your nav structure here. Return types must match `NavSection`, `Level2Nav`, `Level3Nav` from `@beacon/app-layout`.
+
+> **Available component library:** Your pages can import from `@beacon/ui` for the full Beacon component library (buttons, badges, cards, tables, KPI strips, blocks). The shell already imports `@beacon/ui/styles/tokens.css` globally — no additional CSS setup needed in your app. The `"@beacon/ui": ">=0.1.0"` peer dependency in the `package.json` above covers this.
+
+**`src/index.ts`** — **inline `getManifest` here, do not re-export it:**
+
+```ts
+import { getNavigation, getLevel2Navigation, getLevel3Navigation } from './navigation';
+import type { NavSection, Level2Nav, Level3Nav } from '@beacon/app-layout';
+
+export type { MyCoolAppRouteDef } from './routeDefinitions';
+export { routeDefinitions as myCoolAppRouteDefinitions } from './routeDefinitions';
+
+// IMPORTANT: define getManifest inline — do not re-export from ./navigation.
+// Rollup requires a direct export in the built entry file.
+export interface MyCoolAppManifest {
+  navigation: NavSection[];
+  level2Navigation: Level2Nav[];
+  level3Navigation: Level3Nav[];
+}
+
+export function getManifest(basePath = ''): MyCoolAppManifest {
+  return {
+    navigation: getNavigation(basePath),
+    level2Navigation: getLevel2Navigation(basePath),
+    level3Navigation: getLevel3Navigation(basePath),
+  };
+}
+```
+
+**`src/routeDefinitions.tsx`** — maps path segments (relative to your app base) to page components:
+
+```tsx
+import type { ComponentType } from 'react';
+import DashboardPage from './pages/DashboardPage';
+
+export interface MyCoolAppRouteDef {
+  path: string;
+  component: ComponentType;
+}
+
+export const routeDefinitions: MyCoolAppRouteDef[] = [
+  { path: '',         component: DashboardPage },  // matches /my-cool-app
+  { path: '*',        component: DashboardPage },  // catch-all
+];
+```
+
+Build the package (from the `packages/my-cool-app-ui/` directory):
+
+```bash
+cd packages/my-cool-app-ui && npm install && npm run build
+```
+
+Commit everything:
+
+```bash
+cd ../../ && git add packages/ && git commit -m "feat: add my-cool-app-ui package"
+git push origin development
+```
+
+---
+
+## Step 4: Add as a submodule in beacon-tenant
+
+In your local clone of **beacon-tenant** (from `~/GitHub/beacon-tenant`):
+
+```bash
+cd ~/GitHub/beacon-tenant
+git submodule add https://github.com/RankinCo-Services/my-cool-app.git my-cool-app
+git submodule update --init my-cool-app
+git add .gitmodules my-cool-app
+git commit -m "chore: add my-cool-app submodule"
+```
+
+---
+
+## Step 5: Register the UI package in the shell
+
+From beacon-tenant root, make these four changes to `apps/shell/`:
+
+### 5a. `apps/shell/package.json`
+
+Add the dependency pointing to your package in the submodule:
+
+```json
+"@beacon-tenant/my-cool-app-ui": "file:../../my-cool-app/packages/my-cool-app-ui",
+```
+
+Then reinstall:
+
+```bash
+cd apps/shell && npm install
+```
+
+### 5b. `apps/shell/src/platformNavigation.ts`
+
+Add a nav section entry for your app:
+
+```ts
+import { LayoutDashboard } from 'lucide-react'; // pick an appropriate icon
+
+// Add to platformNavigation array:
+{
+  id: 'my-cool-app',
+  name: 'My Cool App',
+  path: '/my-cool-app',
+  icon: LayoutDashboard,
+  tabs: [{ id: 'my-cool-app', label: 'My Cool App', path: '/my-cool-app' }],
+  description: 'My Cool App description',
+},
+```
+
+### 5c. `apps/shell/src/PlatformLayout.tsx`
+
+Import your manifest and add a branch in `useMergedNav()`:
+
+```ts
+import { getManifest as getMyCoolAppManifest } from '@beacon-tenant/my-cool-app-ui';
+
+// Inside useMergedNav(), before the PSA branch:
+if (pathname.startsWith('/my-cool-app')) {
+  const manifest = getMyCoolAppManifest('/my-cool-app');
+  const prefixed = prefixManifestIds('my-cool-app', manifest.navigation, manifest.level2Navigation, manifest.level3Navigation);
+  return {
+    navigation: prefixed.navigation,
+    level2Navigation: [...platformLevel2Navigation, ...prefixed.level2Navigation],
+    level3Navigation: [...platformLevel3Navigation, ...prefixed.level3Navigation],
+  };
+}
+```
+
+### 5d. `apps/shell/src/App.tsx`
+
+Import your route definitions and mount them under `TenantAuthGuard` + `PlatformReadyGate`:
+
+```tsx
+import { myCoolAppRouteDefinitions, type MyCoolAppRouteDef } from '@beacon-tenant/my-cool-app-ui';
+
+// Inside the <Route element={<TenantAuthGuard><PlatformReadyGate /></TenantAuthGuard>}> block,
+// alongside the psa and grc routes:
+{myCoolAppRouteDefinitions.map((def: MyCoolAppRouteDef, idx) => {
+  const path = def.path === '' ? 'my-cool-app' : def.path === '*' ? 'my-cool-app/*' : `my-cool-app/${def.path}`;
+  const Component = def.component;
+  return <Route key={`my-cool-app-${path}-${idx}`} path={path} element={<Component />} />;
+})}
+```
+
+---
+
+## Step 6: Add your package to the shell's Tailwind config
+
+In `apps/shell/tailwind.config.js`, add your package source so Tailwind generates the classes your pages use:
+
+```js
+content: [
+  './index.html',
+  './src/**/*.{js,ts,jsx,tsx}',
+  '../../packages/tenant-ui/src/**/*.{js,ts,jsx,tsx}',
+  '../../beacon-app-layout/src/**/*.{js,ts,jsx,tsx}',
+  '../../Beacon/packages/psa-ui/src/**/*.{js,ts,jsx,tsx}',
+  '../../beacon-grc/packages/grc-ui/src/**/*.{js,ts,jsx,tsx}',
+  '../../my-cool-app/packages/my-cool-app-ui/src/**/*.{js,ts,jsx,tsx}', // ← add this
+],
+```
+
+---
+
+## Step 7: Register the app in the platform
+
+The app must exist in the platform DB so it appears in the app launcher and subscriptions work.
+
+Add it to the permission seeder in the **platform backend** (`packages/platform-server/src/...`), following the same pattern as `psa` and `grc`. Ask your lead if you're not sure where the seeder is. After the seeder runs (redeploy), the app appears under **Platform Admin → Apps**.
+
+Then in **Platform Admin → Subscriptions**, assign the app to the tenants that should see it.
+
+---
+
+## Step 8: Set env vars on Render
+
+**Shell (beacon-inversion-frontend):**
+
+Add an env var for your app's API:
+
+| Name | Value |
+|------|-------|
+| `VITE_MY_COOL_APP_API_URL` | `https://my-cool-app-api.onrender.com` |
+
+The name pattern is `VITE_` + app slug in `SCREAMING_SNAKE_CASE` + `_API_URL`. Redeploy the shell after adding it.
+
+**App API (my-cool-app-api):**
+
+| Name | Value |
+|------|-------|
+| `FRONTEND_URL` | Shell frontend URL (e.g. `https://beacon-inversion-frontend.onrender.com`) |
+| `PLATFORM_API_URL` | Platform API URL |
+| `PLATFORM_INTERNAL_SECRET` | Shared secret for tenant validation |
+
+---
+
+## Step 9: Commit and deploy
+
+In beacon-tenant, commit the submodule ref and shell changes from your `development` branch, then sync and deploy:
+
+```bash
+cd ~/GitHub/beacon-tenant
+git add apps/shell my-cool-app .gitmodules
+git commit -m "feat: add my-cool-app to shell"
+git push origin development
+
+# Sync all submodules to development and trigger Render deploy
+./scripts/sync-all-submodules.sh development
+```
+
+> **Branch note:** All work is done on `development`. `./scripts/sync-all-submodules.sh development` syncs submodules (Beacon, beacon-app-layout, beacon-grc) to their latest `development` commits, commits the updated submodule refs in beacon-tenant, and pushes — triggering a Render build.
+
+Monitor the build on Render — `scripts/render-build.sh` inits the submodule and builds the shell.
+
+---
+
+## Step 10: Verify
+
+1. Log into Beacon — the shell URL.
+2. Your app should appear in the sidebar and app launcher.
+3. Navigate to `/my-cool-app` — you should see your `DashboardPage` inside the Beacon layout.
+
+---
+
+## After initial setup: ongoing development
+
+**When you make UI changes in your app repo:**
+
+1. Build the UI package: `cd packages/my-cool-app-ui && npm run build`
+2. Commit and push the app repo.
+3. In beacon-tenant, sync submodules and deploy:
+   ```bash
+   cd ~/GitHub/beacon-tenant
+   ./scripts/sync-all-submodules.sh development
+   ```
+
+**Local dev:**
+
+Run the beacon-tenant shell locally — it resolves your UI package from the local submodule via the `file:` path. No separate frontend server needed.
+
+```bash
+# Terminal 1 — app backend
+cd ~/GitHub/my-cool-app/backend && npm install && npm run dev
+
+# Terminal 2 — shell (resolves your UI package from submodule)
+cd ~/GitHub/beacon-tenant/apps/shell && npm install && npm run dev
+```
+
+Set `apps/shell/.env.local` with:
+
+```
+VITE_CLERK_PUBLISHABLE_KEY=pk_test_...
+VITE_API_URL=http://localhost:3001        # platform API (if running locally)
+VITE_MY_COOL_APP_API_URL=http://localhost:3000
+```
+
+---
+
+## Quick reference
+
+| Step | What | Where |
+|------|------|-------|
+| 1 | Create repo from template | GitHub — beacon-app-min |
+| 2 | Bootstrap Render (DB + API, `--in-platform`) | Terminal — bootstrap script |
+| 3 | Create `packages/<app>-ui/` | Your app repo |
+| 4 | Add submodule | `beacon-tenant` repo |
+| 5 | Register in shell (package.json, PlatformLayout, App, platformNavigation) | `beacon-tenant/apps/shell/` |
+| 6 | Add Tailwind content path | `beacon-tenant/apps/shell/tailwind.config.js` |
+| 7 | Seed app in platform DB | Platform backend seeder |
+| 8 | Set env vars on Render | Render Dashboard |
+| 9 | Commit + deploy | `beacon-tenant` — `./scripts/sync-all-submodules.sh development` |
 
 **Render workspace (RankinCo Services):** `tea-d5qerqf5r7bs738jbqmg`
 
-**If the script fails:** Check that `RENDER_API_KEY` is set, that you have access to the GitHub repo and Render workspace, and that the app name uses only lowercase letters and hyphens. If the database URL isn’t ready, you can set `DATABASE_URL` later in Render on the **my-cool-app-api** service and redeploy.
+**Deploy flow:** All work on `development`. Deploy to dev: `./scripts/sync-all-submodules.sh development` (syncs submodules + pushes → Render auto-deploys). Promote to production: `./scripts/production-build-check.sh` then `./scripts/promote-to-production.sh --execute "message"` (merges `development` → `main` across all repos).
 
-**More detail:**  
-- beacon-app-min: [README](https://github.com/RankinCo-Services/beacon-app-min) and [docs/MULTI_APP_RUNBOOK.md](https://github.com/RankinCo-Services/beacon-app-min/blob/main/docs/MULTI_APP_RUNBOOK.md)  
-- Beacon: DEPLOYMENT.md (in-platform apps env)
+**getManifest must be inlined** in the package's `src/index.ts`. Do not re-export it from a sub-file — Rollup won't resolve it from a pre-built dist entry.
+
+**Reference docs:**
+- [INVERSION_SHELL_BUILD_AND_LAYOUT.md](../beacon-tenant/docs/INVERSION_SHELL_BUILD_AND_LAYOUT.md) — build gotchas and Rollup fix
+- [PLATFORM_APP_CONTRACT.md](../beacon-tenant/docs/PLATFORM_APP_CONTRACT.md) — platform ↔ app API (tenant validation, audit ingest, cache invalidation)
+- [beacon-app-min README](https://github.com/RankinCo-Services/beacon-app-min) — backend/Prisma setup, migration scripts
