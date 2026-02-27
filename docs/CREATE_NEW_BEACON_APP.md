@@ -2,6 +2,11 @@
 
 Step-by-step instructions for creating a new app in the **post-inversion** Beacon architecture.
 
+**One-line prompt (for agents):**  
+*"Create a new Beacon app from beacon-app-min named \<app-slug\> and add it to the shell."*  
+Example: *"Create a new Beacon app from beacon-app-min named my-cool-app and add it to the shell."*  
+Follow this doc (create repo from template → bootstrap Render `--in-platform` → create `packages/<app>-ui` → add submodule in beacon-tenant → register in shell → env vars → deploy).
+
 ---
 
 ## Architecture overview (read this first)
@@ -322,11 +327,34 @@ content: [
 
 ## Step 7: Register the app in the platform
 
-The app must exist in the platform DB so it appears in the app launcher and subscriptions work.
+The app must exist in the platform DB so it appears in the app launcher and subscriptions work. The **platform API** (beacon-platform-api) seeds apps on every startup from beacon-tenant’s catalog; add your app there so the App row is created.
 
-Add it to the permission seeder in the **platform backend** (`packages/platform-server/src/...`), following the same pattern as `psa` and `grc`. Ask your lead if you're not sure where the seeder is. After the seeder runs (redeploy), the app appears under **Platform Admin → Apps**.
+**In beacon-tenant:**
 
-Then in **Platform Admin → Subscriptions**, assign the app to the tenants that should see it.
+1. **Permission catalog** — In `packages/tenant/src/permissions/catalog.ts`, add your app to `PERMISSION_CATALOG` (use an empty array if the app has no permission definitions yet, e.g. launcher-only):
+   ```ts
+   const MY_COOL_APP_PERMISSIONS: PermissionDefinition[] = [];
+   export const PERMISSION_CATALOG = {
+     platform: PLATFORM_PERMISSIONS,
+     psa: PSA_PERMISSIONS,
+     'my-cool-app': MY_COOL_APP_PERMISSIONS,
+   };
+   ```
+
+2. **App display name** — In `packages/tenant/src/bootstrap/platformBootstrap.ts`, add your app to `APP_DISPLAY_NAMES`:
+   ```ts
+   const APP_DISPLAY_NAMES: Record<string, { name: string; description: string }> = {
+     psa: { ... },
+     'my-cool-app': {
+       name: 'My Cool App',
+       description: 'My Cool App in-platform (beacon-app-min)',
+     },
+   };
+   ```
+
+3. **Optional: Beacon seeder** — For first-time platform bootstrap consistency, add the same app in **Beacon**’s `backend/src/utils/permissionSeeder.ts` (create/update block for your `namespace`). The platform API only runs that path when no platform tenant exists; for existing deployments, the catalog above is what creates the App row.
+
+After redeploying the **platform API**, the app appears under **Platform Admin → Apps**. Then in **Platform Admin → Subscriptions**, assign the app to the tenants that should see it.
 
 ---
 
@@ -368,7 +396,7 @@ git push origin development
 
 > **Branch note:** All work is done on `development`. `./scripts/sync-all-submodules.sh development` syncs submodules (Beacon, beacon-app-layout, beacon-grc) to their latest `development` commits, commits the updated submodule refs in beacon-tenant, and pushes — triggering a Render build.
 
-Monitor the build on Render — `scripts/render-build.sh` inits the submodule and builds the shell.
+Monitor the build on Render — `scripts/render-build.sh` inits all submodules (from `.gitmodules`), writes all `VITE_*` env vars to the shell build, and `scripts/build-submodules.sh` builds every `packages/*-ui` in every app submodule. **No manual edits** to `render-build.sh` or `build-submodules.sh` are required when adding a new app.
 
 ---
 
@@ -414,6 +442,25 @@ VITE_MY_COOL_APP_API_URL=http://localhost:3000
 
 ---
 
+## Development vs production: separate Render services
+
+**Production** is built from `main`. The first bootstrap creates `{app}-db` and `{app}-api`; those services deploy from `main` by default.
+
+To have a **development environment** you need:
+
+1. **A `development` branch** in the app repo (and in beacon-tenant). All day-to-day work happens on `development`; production is updated only via promote (e.g. `promote-to-production.sh`).
+2. **A separate set of Render services for development** so that pushing `development` does not deploy to production. Create them by running the same bootstrap script with a **different app name** (e.g. `psa-v2-dev`):
+   ```bash
+   # From the app repo (e.g. psa-v2)
+   ./scripts/render-bootstrap-multi-app.sh psa-v2-dev tea-d5qerqf5r7bs738jbqmg https://github.com/RankinCo-Services/psa-v2 --in-platform --no-prompt --branch development
+   ```
+   That creates `psa-v2-dev-db` and `psa-v2-dev-api` (API already set to branch `development`). Set `DATABASE_URL` on the dev API from the dev DB’s connection info, and set `FRONTEND_URL` to your **dev shell** URL (if you have a separate shell for development) or the same production shell URL for CORS.
+3. **Dev shell** (if you use one): set `VITE_PSA_V2_API_URL` (or your app’s `VITE_*_API_URL`) to the **dev API** URL (e.g. `https://psa-v2-dev-api.onrender.com`). Production shell keeps pointing at the production API.
+
+**Summary:** Production = `main` + `{app}-db` / `{app}-api`. Development = `development` branch + `{app}-dev-db` / `{app}-dev-api` (branch set to `development`). `sync-all-submodules.sh development` pushes beacon-tenant’s `development` and triggers the **dev** shell/API if those Render services are configured to deploy from `development`.
+
+---
+
 ## Quick reference
 
 | Step | What | Where |
@@ -424,7 +471,7 @@ VITE_MY_COOL_APP_API_URL=http://localhost:3000
 | 4 | Add submodule | `beacon-tenant` repo |
 | 5 | Register in shell (package.json, PlatformLayout, App, platformNavigation) | `beacon-tenant/apps/shell/` |
 | 6 | Add Tailwind content path | `beacon-tenant/apps/shell/tailwind.config.js` |
-| 7 | Seed app in platform DB | Platform backend seeder |
+| 7 | Register app in platform (catalog + APP_DISPLAY_NAMES in beacon-tenant) | `packages/tenant` + optional Beacon seeder |
 | 8 | Set env vars on Render | Render Dashboard |
 | 9 | Commit + deploy | `beacon-tenant` — `./scripts/sync-all-submodules.sh development` |
 
